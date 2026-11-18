@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>订单进度 · BY Credit 业务员</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body class="mobile-body">
+<div class="app">
+  <header class="m-top">
+    <a class="btn sm ghost" href="sales-orders.html">返回</a>
+    <div class="grow" style="text-align:center">
+      <div class="m-title" style="font-size:15px">订单进度</div>
+      <div class="m-sub" id="orderNo">—</div>
+    </div>
+    <span style="width:38px"></span>
+  </header>
+
+  <div class="m-body" id="body"></div>
+  <div class="m-foot" id="foot"></div>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script>
+(function () {
+  const id = U.qs('id') || 'o1';
+  const $ = s => document.querySelector(s);
+  let order = null;
+
+  function stageIndex(s) {
+    if (s === 'pending_first' || s === 'rejected_first') return 1;
+    if (s === 'pending_customer_sign') return 2;
+    if (s === 'pending_final' || s === 'rejected_final') return 3;
+    if (s === 'approved_final' || s === 'pending_finance' || s === 'pending_payout') return 4;
+    return 5;
+  }
+
+  function render() {
+    const o = order, c = o.customer, d = o.device, p = o.plan;
+    $('#orderNo').textContent = o.no;
+    const idx = stageIndex(o.status);
+    const stages = ['提交成功', '初审', '客户签约', '终审', '财务放款', '还款中'];
+    const rejected = o.status === 'rejected_first' || o.status === 'rejected_final';
+    const isRepayment = ['repaying', 'overdue', 'breach', 'closed'].indexOf(o.status) > -1;
+    const principal = p.price - (p.downPayment || 0);
+    const billTotal = o.bills.reduce((sum, b) => sum + b.amount, 0);
+
+    const tl = stages.map((s, i) => {
+      let state = i < idx ? 'done' : i === idx ? 'now' : '';
+      if (i === idx && rejected) state = 'done';
+      let sub = '';
+      if (i === 0) sub = o.submittedAt + ' · ' + o.plan.salesName;
+      if (i === 1 && o.review.first) sub = (o.review.first.result === 'pass' ? '已通过' : '已驳回') + ' · ' + o.review.first.at;
+      if (i === 2 && o.esign.status !== '未发起') sub = o.esign.status + (o.esign.contractNo ? ' · ' + o.esign.contractNo : '');
+      if (i === 3 && o.review.final) sub = (o.review.final.result === 'pass' ? '已通过' : '已驳回') + ' · ' + o.review.final.at;
+      if (i === 4) sub = o.payout.status === '已放款' ? '已放款 · ' + o.payout.at : (o.finance.status !== '未提交' ? '财务：' + o.finance.status : '');
+      if (i === 5 && idx >= 5) sub = '首期应还 ' + o.bills[0].dueDate;
+      return `<div class="tl-item ${state}"><div class="tl-title">${s}</div><div class="tl-sub">${U.esc(sub) || '待处理'}</div></div>`;
+    }).join('');
+
+    const docChips = MOCK.DOC_TYPES.map(t => {
+      const has = !!o.docs[t.key];
+      return `<span class="pill ${has ? 'green' : (t.required ? 'red' : 'gray')}" style="margin:0 6px 6px 0">${t.label}${has ? '' : ' · 待补'}</span>`;
+    }).join('');
+
+    $('#body').innerHTML = `
+      <div class="m-card">
+        <div class="row-between">
+          <div>
+            <div class="small faint">订单状态</div>
+            <div class="mt8">${U.pill(o.status)}</div>
+          </div>
+          <div class="t-right">
+            <div class="small faint">分期额</div>
+            <div class="money" style="font-size:17px;font-weight:650">${U.currency(principal)}</div>
+          </div>
+        </div>
+      </div>
+
+      ${rejected ? `<div class="alert danger mb12"><span>驳回</span><span>${U.esc(o.rejectReason)}</span></div>` : ''}
+
+      <div class="m-card">
+        <div class="section-title">办理进度</div>
+        <div class="timeline" style="padding-left:18px">${tl}</div>
+        ${rejected ? `<div class="hint mt12">补件后点击下方「重新提交」，订单会回到初审队列。</div>` : ''}
+      </div>
+
+      <div class="m-card">
+        <div class="section-title">客户与设备</div>
+        <div class="kv" style="grid-template-columns:74px 1fr;gap:8px 10px;font-size:12.5px">
+          <div class="kv-k">客户</div><div class="kv-v">${U.esc(c.name)} · ${U.esc(c.phone)}</div>
+          <div class="kv-k">紧急联系人</div><div class="kv-v">${U.esc(c.emergencyName)}（${U.esc(c.emergencyRelation)}）${U.esc(c.emergencyPhone)}</div>
+          <div class="kv-k">设备</div><div class="kv-v">${U.esc(d.model)} ${U.esc(d.capacity)} ${U.esc(d.color)}</div>
+          <div class="kv-k">IMEI</div><div class="kv-v mono">${U.esc(d.imei)}</div>
+          <div class="kv-k">门店</div><div class="kv-v">${U.esc(p.storeName)}</div>
+        </div>
+        <div class="divider"></div>
+        <div class="section-title">资料</div>
+        <div>${docChips}</div>
+      </div>
+
+      <div class="m-card">
+        <div class="section-title">分期方案</div>
+        <div class="fee-row"><span>售价</span><b>${U.currency(p.price)}</b></div>
+        <div class="fee-row"><span>首付款</span><b>${U.currency(p.downPayment)}</b></div>
+        <div class="fee-row"><span>分期额</span><b>${U.currency(principal)}</b></div>
+        <div class="fee-row"><span>期数 × 每期金额</span><b>${p.periods} × ${U.currency(p.perPeriod)}</b></div>
+        <div class="fee-row total"><span>账单合计</span><b>${U.currency(billTotal)}</b></div>
+      </div>
+
+      <div class="m-card">
+        <div class="section-title">操作日志（${(o.logs || []).length}）</div>
+        ${(o.logs || []).length ? `<div class="timeline" style="padding-left:18px">${o.logs.slice().reverse().map(log => `<div class="tl-item">
+          <div class="tl-title">${U.esc(log.action)}</div>
+          <div class="tl-sub">${U.esc(log.at)} · ${U.esc(log.by)} / ${U.esc(log.role)}</div>
+          <div class="tl-sub">${U.esc(log.before || '—')} → ${U.esc(log.after || '—')}</div>
+          ${log.note ? `<div class="tl-sub">说明：${U.esc(log.note)}</div>` : ''}
+        </div>`).join('')}</div>` : '<div class="hint">暂无操作日志</div>'}
+      </div>
+
+      ${isRepayment ? `<div class="m-card">
+        <div class="section-title">我的账单</div>
+        ${o.bills.map(b => `<div class="row-between" style="padding:9px 0;border-bottom:1px dashed #EDF0F6">
+          <div><div class="small" style="font-weight:500">第 ${b.period} 期 · ${b.dueDate}</div>
+            <div class="small faint">${b.channel || b.note || '—'}</div></div>
+          <div class="t-right"><div class="money small" style="font-weight:600">${U.currency(b.amount)}</div>
+            <div class="mt8" style="margin-top:2px">${U.billPill(b.status)}</div></div>
+        </div>`).join('')}
+      </div>` : ''}`;
+
+    // 底部操作
+    const unpaid = o.bills.find(b => b.status !== 'Paid' && b.status !== 'Settled');
+    if (rejected) {
+      $('#foot').innerHTML = `<button class="btn primary" id="btnResubmit">补件完成，重新提交</button>`;
+      $('#btnResubmit').addEventListener('click', async () => {
+        await API.resubmit(o.id);
+        U.toast('已重新提交，等待初审');
+        order = await API.getOrder(id);
+        render();
+      });
+    } else if (isRepayment && unpaid) {
+      $('#foot').innerHTML = `<a class="btn primary" href="mp-bill.html?order=${o.id}&period=${unpaid.period}">去小程序还款</a>`;
+    } else {
+      $('#foot').innerHTML = `<a class="btn" href="sales-orders.html">返回订单列表</a>`;
+    }
+  }
+
+  (async function () {
+    order = await API.getOrder(id);
+    if (!order) { $('#body').innerHTML = '<div class="empty">订单不存在</div>'; return; }
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

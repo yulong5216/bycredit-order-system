@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>我的订单 · BY Credit 业务员</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body class="mobile-body">
+<div class="app">
+  <header class="m-top">
+    <div class="grow">
+      <div class="m-title">我的订单</div>
+      <div class="m-sub">Hanoi-KT 268 Mobile · MHAI</div>
+    </div>
+  </header>
+
+  <div class="m-body">
+    <div class="kpis" style="grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px" id="kpis"></div>
+
+    <div class="tabs" id="tabs" style="padding:0;margin-bottom:10px;border-bottom:1px solid var(--line)">
+      <div class="tab active" data-f="all">全部</div>
+      <div class="tab" data-f="pending">待审核</div>
+      <div class="tab" data-f="rejected">被驳回</div>
+      <div class="tab" data-f="repaying">还款中</div>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+  <a class="fab" href="sales-new-order.html">＋ 新建录单</a>
+
+  <nav class="m-tabbar">
+    <a class="m-tab active" href="sales-orders.html"><i></i>订单</a>
+    <span class="m-tab disabled"><i></i>客户</span>
+    <span class="m-tab disabled"><i></i>我的</span>
+  </nav>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script>
+(function () {
+  let filter = 'all';
+  const $ = s => document.querySelector(s);
+
+  const GROUP = {
+    pending: ['pending_first', 'pending_customer_sign', 'pending_final', 'approved_final', 'pending_finance', 'pending_payout'],
+    rejected: ['rejected_first', 'rejected_final'],
+    repaying: ['repaying', 'overdue', 'breach', 'closed']
+  };
+
+  function card(o) {
+    const p = o.plan;
+    const next = o.bills.find(b => b.status !== 'Paid' && b.status !== 'Settled');
+    return `<div class="m-card clickable" onclick="location.href='sales-order-detail.html?id=${o.id}'">
+      <div class="row-between">
+        <div style="font-size:14.5px;font-weight:600">${U.esc(o.customer.name)}</div>
+        ${U.pill(o.status)}
+      </div>
+      <div class="small muted mt8">${U.esc(o.device.model)} ${U.esc(o.device.capacity)} · ${p.periods} 期 × ${U.currency(p.perPeriod)}</div>
+      <div class="divider" style="margin:10px 0"></div>
+      <div class="row-between small">
+        <span class="faint">${U.esc(o.no)}</span>
+        <span class="money">${U.currency(p.price)}</span>
+      </div>
+      ${o.status === 'rejected_first' || o.status === 'rejected_final' ? `<div class="alert danger mt8"><span>!</span><span>${U.esc(o.rejectReason)}</span></div>` : ''}
+      ${o.status === 'pending_customer_sign' ? `<div class="small mt8" style="color:#B45309">等待客户在 MobiFone 完成电子签约</div>` : ''}
+      ${o.status === 'pending_payout' ? `<div class="small mt8" style="color:#067A54">终审已通过，等待财务放款</div>` : ''}
+      ${next && ['repaying', 'overdue'].indexOf(o.status) > -1 ? `<div class="small mt8" style="color:#B45309">下一期：${next.dueDate} · ${U.currency(next.amount)}</div>` : ''}
+    </div>`;
+  }
+
+  async function load() {
+    const res = await API.listOrders({ size: 99 });
+    const all = res.items;
+    const counts = {
+      pending: all.filter(o => GROUP.pending.indexOf(o.status) > -1).length,
+      rejected: all.filter(o => GROUP.rejected.indexOf(o.status) > -1).length,
+      repaying: all.filter(o => GROUP.repaying.indexOf(o.status) > -1).length
+    };
+    $('#kpis').innerHTML = `
+      <div class="kpi"><div class="kpi-label">全部订单</div><div class="kpi-value">${all.length}<small>单</small></div></div>
+      <div class="kpi"><div class="kpi-label">待审核</div><div class="kpi-value">${counts.pending}<small>单</small></div></div>
+      <div class="kpi"><div class="kpi-label">被驳回</div><div class="kpi-value" style="color:${counts.rejected ? '#D92D20' : 'inherit'}">${counts.rejected}<small>单</small></div></div>
+      <div class="kpi"><div class="kpi-label">还款中</div><div class="kpi-value">${counts.repaying}<small>单</small></div></div>`;
+
+    let list = all;
+    if (filter !== 'all') list = all.filter(o => GROUP[filter].indexOf(o.status) > -1);
+    $('#list').innerHTML = list.length
+      ? list.map(card).join('')
+      : `<div class="empty"><div class="empty-mark">∅</div>该分组下暂无订单</div>`;
+  }
+
+  document.querySelectorAll('.tab').forEach(el => el.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    el.classList.add('active'); filter = el.dataset.f; load();
+  }));
+
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>门店管理 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">门店管理</div>
+          <div class="page-sub" id="pageSub">门店台账 · 共 0 家</div>
+        </div>
+        <div class="row"></div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card">
+        <div class="toolbar">
+          <div class="search"><input id="q" placeholder="门店编号 / 名称 / 城市 / 联系人 / 电话"></div>
+          <select class="select mini" id="city"><option value="">全部城市</option></select>
+          <select class="select mini" id="type">
+            <option value="all">全部类型</option>
+            <option value="合作店铺">合作店铺</option>
+            <option value="自有店铺">自有店铺</option>
+          </select>
+          <select class="select mini" id="status">
+            <option value="all">全部状态</option>
+            <option value="正常">正常</option>
+            <option value="冻结">冻结</option>
+          </select>
+          <select class="select mini" id="rating">
+            <option value="all">全部评级</option>
+            <option value="A">A 级</option>
+            <option value="B">B 级</option>
+            <option value="C">C 级</option>
+            <option value="D">D 级</option>
+          </select>
+          <button class="btn sm" id="searchBtn">查询</button>
+          <button class="btn sm ghost" id="clearBtn">清空</button>
+          <span class="grow-line"></span>
+          <button class="btn sm primary" id="addBtn">＋ 新增门店</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>门店编号</th>
+                <th>门店名称 / 城市</th>
+                <th>类型</th>
+                <th>地址</th>
+                <th>联系人 / 电话</th>
+                <th>收款信息</th>
+                <th>合同 / 回收协议</th>
+                <th>评级</th>
+                <th>状态</th>
+                <th class="t-right">进件量 / 待处理</th>
+                <th class="t-right">累计放款</th>
+                <th class="t-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal" id="modalPanel" style="max-width:660px">
+    <div class="modal-head">
+      <div class="modal-title" id="modalTitle">门店详情</div>
+      <button class="x" id="modalClose">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  Shell.mount({ nav: 'stores', crumb: '运营与系统 / <b>门店管理</b>' });
+  const storeNav = document.querySelector('.nav-item[data-nav="stores"]');
+  if (storeNav) storeNav.textContent = '门店管理';
+
+  const $ = s => document.querySelector(s);
+  const state = { q: '', city: '', type: 'all', status: 'all', rating: 'all' };
+  const ratingMeta = {
+    A: { tone: 'green', desc: '正常' },
+    B: { tone: 'blue', desc: '影响放款比例' },
+    C: { tone: 'amber', desc: '影响放款比例' },
+    D: { tone: 'red', desc: '黑名单' }
+  };
+  let allRows = [];
+  let visible = [];
+
+  function actor() { return Shell.roleInfo().name; }
+  function canAdminStores() { return Shell.can('新增 / 停用门店'); }
+  function canEditStore(s) {
+    return Shell.role() === 'admin' || (Shell.can('维护本店资料') && s && String(s.id) === String(Shell.roleInfo().storeId));
+  }
+  function typeOf(s) { return s.type || '合作店铺'; }
+  function statusOf(s) {
+    if (s.status === '正常' || s.status === '冻结') return s.status;
+    return s.status === '暂停' ? '冻结' : '正常';
+  }
+  function ratingOf(s) { return ratingMeta[s.rating] ? s.rating : 'A'; }
+  function autoRatingOf(s) { return ratingMeta[s.ratingAuto] ? s.ratingAuto : ratingOf(s); }
+  function metricsOf(s) {
+    const m = s.metrics || {};
+    return {
+      orders: m.orders == null ? (s.orders || 0) : m.orders,
+      passRate: m.passRate,
+      firstOverdueRate: m.firstOverdueRate,
+      badDebtRate: m.badDebtRate
+    };
+  }
+  function contractOf(s) {
+    if (typeof s.contract === 'string') return { name: s.contract, at: s.contractAt || '' };
+    return s.contract || s.contractFile || (s.contractName ? { name: s.contractName, at: s.contractAt || '' } : {});
+  }
+  function sameId(a, b) { return String(a) === String(b); }
+  function findStore(id) { return allRows.find(s => sameId(s.id, id)); }
+
+  function percent(value) {
+    if (value == null || value === '' || isNaN(Number(value))) return '—';
+    const n = Number(value);
+    const v = n > 0 && n <= 1 ? n * 100 : n;
+    return (Math.round(v * 10) / 10) + '%';
+  }
+
+  function agreementPill(a, type) {
+    if (type === '自有店铺' || a === '无需签署') return '<span class="pill gray plain">无需回收协议</span>';
+    const map = { '已签署': 'green', '待续签': 'amber', '待签署': 'amber' };
+    return `<span class="pill ${map[a] || 'gray'}">${U.esc(a || '待签署')}</span>`;
+  }
+
+  function statusPill(s) {
+    return statusOf(s) === '正常'
+      ? '<span class="pill green">正常</span>'
+      : '<span class="pill red">冻结</span>';
+  }
+
+  function typePill(s) {
+    return typeOf(s) === '自有店铺'
+      ? '<span class="tag blue">自有店铺</span>'
+      : '<span class="tag">合作店铺</span>';
+  }
+
+  function ratingPill(rating) {
+    const r = ratingMeta[rating] ? rating : 'A';
+    return `<span class="pill ${ratingMeta[r].tone} plain">${r} · ${ratingMeta[r].desc}</span>`;
+  }
+
+  function contractPill(s) {
+    const c = contractOf(s);
+    return c.name
+      ? '<span class="pill green plain">合同已上传</span>'
+      : '<span class="pill amber plain">待上传合同</span>';
+  }
+
+  function buildCityOptions() {
+    const sel = $('#city');
+    const cur = state.city || sel.value;
+    const cities = [];
+    allRows.forEach(s => { if (s.city && cities.indexOf(s.city) === -1) cities.push(s.city); });
+    sel.innerHTML = '<option value="">全部城市</option>' +
+      cities.map(c => `<option value="${U.esc(c)}">${U.esc(c)}</option>`).join('');
+    if (cities.indexOf(cur) > -1) sel.value = cur;
+    else { sel.value = ''; state.city = ''; }
+  }
+
+  function renderKpis(rows) {
+    const normal = rows.filter(s => statusOf(s) === '正常').length;
+    const frozen = rows.length - normal;
+    const own = rows.filter(s => typeOf(s) === '自有店铺').length;
+    const blacklist = rows.filter(s => ratingOf(s) === 'D').length;
+    const list = [
+      { label: '门店总数', value: rows.length + ' 家', foot: `合作店铺 ${rows.length - own} 家 · 自有店铺 ${own} 家` },
+      { label: '正常门店', value: normal + ' 家', foot: '可录入新单并按流程送财务' },
+      { label: '冻结门店', value: frozen + ' 家', foot: frozen ? '不可录新单 / 送财务，在贷继续还款' : '当前无冻结门店' },
+      { label: '黑名单门店', value: blacklist + ' 家', foot: 'D 级黑名单 · B / C 影响放款比例' }
+    ];
+    $('#kpis').innerHTML = list.map(k => `<div class="kpi">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div class="kpi-foot">${k.foot}</div>
+    </div>`).join('');
+  }
+
+  function row(s) {
+    const p = s.payee || {};
+    const m = metricsOf(s);
+    const auto = autoRatingOf(s);
+    const current = ratingOf(s);
+    return `<tr data-id="${U.esc(s.id)}">
+      <td class="mono">${U.esc(s.id)}</td>
+      <td>
+        <div class="strong">${U.esc(s.name)}</div>
+        <div class="sub"><span class="tag">${U.esc(s.city || '未填写')}</span></div>
+      </td>
+      <td>${typePill(s)}</td>
+      <td><div class="small muted">${U.esc(s.address || '—')}</div></td>
+      <td>
+        <div>${U.esc(s.contact || '—')}</div>
+        <div class="sub mono">${U.esc(s.phone || '—')}</div>
+      </td>
+      <td>
+        <div>${U.esc(p.name || '—')}</div>
+        <div class="sub">${U.esc(p.bank || '—')}</div>
+        <div class="sub mono">${U.esc(p.account || '—')}</div>
+      </td>
+      <td>
+        <div>${contractPill(s)}</div>
+        <div class="sub">${agreementPill(s.agreement, typeOf(s))}</div>
+      </td>
+      <td>
+        <div>${ratingPill(current)}</div>
+        <div class="sub">${current === auto ? '自动评级' : '人工调整 · 自动 ' + U.esc(auto)}</div>
+      </td>
+      <td>${statusPill(s)}</td>
+      <td class="t-right">
+        <div class="num">${U.esc(m.orders)} 单</div>
+        <div class="sub">待处理 ${U.esc(s.pending || 0)}</div>
+      </td>
+      <td class="t-right money strong">${U.currency(s.payout || 0)}</td>
+      <td class="t-right t-nowrap">
+        ${canEditStore(s) ? `<button class="btn sm ghost" data-edit="${U.esc(s.id)}">编辑</button>` : ''}
+        <button class="btn sm" data-detail="${U.esc(s.id)}">详情</button>
+      </td>
+    </tr>`;
+  }
+
+  async function load() {
+    $('#tbody').innerHTML = '<tr><td colspan="12"><div class="empty">加载中…</div></td></tr>';
+    try {
+      const [all, res] = await Promise.all([
+        API.listStores({}),
+        API.listStores({ q: state.q, status: state.status, type: state.type, rating: state.rating })
+      ]);
+      allRows = Shell.role() === 'manager'
+        ? (all.items || []).filter(s => String(s.id) === String(Shell.roleInfo().storeId))
+        : (all.items || []);
+      buildCityOptions();
+      visible = (res.items || []).filter(s =>
+        (!state.city || s.city === state.city) &&
+        (Shell.role() !== 'manager' || String(s.id) === String(Shell.roleInfo().storeId)));
+      renderKpis(allRows);
+      $('#pageSub').textContent = `门店台账 · 共 ${allRows.length} 家 · 当前显示 ${visible.length} 家`;
+      if (!visible.length) {
+        $('#tbody').innerHTML = '<tr><td colspan="12"><div class="empty"><div class="empty-mark">∅</div>没有符合条件的门店，试试清空筛选条件</div></td></tr>';
+      } else {
+        $('#tbody').innerHTML = visible.map(row).join('');
+      }
+    } catch (err) {
+      $('#tbody').innerHTML = '<tr><td colspan="12"><div class="empty">门店数据加载失败，请稍后重试</div></td></tr>';
+      U.toast(err.message || '门店数据加载失败', 'err');
+    }
+  }
+
+  function openModal(title, body, foot, width) {
+    $('#modalTitle').textContent = title;
+    $('#modalBody').innerHTML = body;
+    $('#modalFoot').innerHTML = foot;
+    $('#modalPanel').style.maxWidth = (width || 660) + 'px';
+    $('#overlay').classList.add('open');
+  }
+
+  function closeModal() {
+    $('#overlay').classList.remove('open');
+  }
+
+  function ratingOptions(selected) {
+    return Object.keys(ratingMeta).map(r =>
+      `<option value="${r}"${r === selected ? ' selected' : ''}>${r} · ${ratingMeta[r].desc}</option>`
+    ).join('');
+  }
+
+  function logHtml(log) {
+    const action = log.action || log.title || log.text || '门店操作';
+    const at = log.at || log.time || log.createdAt || '';
+    const by = log.by || log.operator || '系统';
+    const note = log.note || log.reason || '';
+    const before = log.before || '';
+    const after = log.after || '';
+    return `<div class="tl-item">
+      <div class="tl-title">${U.esc(action)}</div>
+      <div class="tl-sub">${U.esc(at)}${at && by ? ' · ' : ''}${U.esc(by)}</div>
+      ${before || after ? `<div class="tl-sub">变更：${U.esc(before || '—')} → ${U.esc(after || '—')}</div>` : ''}
+      ${note ? `<div class="tl-sub">说明：${U.esc(note)}</div>` : ''}
+    </div>`;
+  }
+
+  function openDetail(id) {
+    const s = findStore(id);
+    if (!s) { U.toast('未找到该门店', 'err'); return; }
+    const p = s.payee || {};
+    const m = metricsOf(s);
+    const c = contractOf(s);
+    const current = ratingOf(s);
+    const auto = autoRatingOf(s);
+    const type = typeOf(s);
+    const logs = Array.isArray(s.logs) ? s.logs : [];
+    const frozen = statusOf(s) === '冻结';
+    openModal('门店详情 · ' + s.name, `
+      ${frozen ? '<div class="alert warn mb12">该门店已冻结：不可录入新单、不可送财务；存量在贷订单继续还款。</div>' : ''}
+      ${current === 'D' ? '<div class="alert warn mb12">该门店当前为 D 级黑名单，请结合评级依据与操作日志复核。</div>' : ''}
+      <div class="section-title">门店基本信息</div>
+      <div class="kv two">
+        <div class="kv-k">门店编号</div><div class="kv-v mono">${U.esc(s.id)}</div>
+        <div class="kv-k">门店类型</div><div class="kv-v">${typePill(s)}</div>
+        <div class="kv-k">门店名称</div><div class="kv-v strong">${U.esc(s.name)}</div>
+        <div class="kv-k">状态</div><div class="kv-v">${statusPill(s)}</div>
+        <div class="kv-k">联系人</div><div class="kv-v">${U.esc(s.contact || '—')}</div>
+        <div class="kv-k">联系电话</div><div class="kv-v mono">${U.esc(s.phone || '—')}</div>
+        <div class="kv-k">城市</div><div class="kv-v">${U.esc(s.city || '—')}</div>
+        <div class="kv-k">当前评级</div><div class="kv-v">${ratingPill(current)}${current !== auto ? ' <span class="tag purple">人工调整</span>' : ''}</div>
+        <div class="kv-k">地址</div><div class="kv-v" style="grid-column:span 3">${U.esc(s.address || '—')}</div>
+      </div>
+      <div class="divider"></div>
+      <div class="section-title">合同与审批</div>
+      <div class="kv two">
+        <div class="kv-k">门店合同</div><div class="kv-v">${c.name ? U.esc(c.name) : '<span class="pill amber plain">待上传</span>'}</div>
+        <div class="kv-k">上传时间</div><div class="kv-v">${U.esc(c.at || c.uploadedAt || '—')}</div>
+        <div class="kv-k">回收协议</div><div class="kv-v">${agreementPill(s.agreement, type)}</div>
+        <div class="kv-k">审批流程</div><div class="kv-v">初审 → 终审 → 财务 → 放款</div>
+      </div>
+      <div class="mini-note mt8">${type === '自有店铺' ? '自有店铺无需签署回收协议，但仍须上传门店合同；订单审批流程与合作店铺一致。' : '合作店铺须上传门店合同并签署回收协议，订单按统一审批流程处理。'}</div>
+      <div class="divider"></div>
+      <div class="section-title">收款账号信息</div>
+      <div class="kv two">
+        <div class="kv-k">收款人</div><div class="kv-v">${U.esc(p.name || '—')}</div>
+        <div class="kv-k">开户行</div><div class="kv-v">${U.esc(p.bank || '—')}</div>
+        <div class="kv-k">收款账号</div><div class="kv-v mono">${U.esc(p.account || '—')}</div>
+        <div class="kv-k">放款方式</div><div class="kv-v">对公转账</div>
+      </div>
+      <div class="divider"></div>
+      <div class="section-title">经营统计与自动评级依据</div>
+      <div class="kpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:10px">
+        <div class="kpi"><div class="kpi-label">进件量</div><div class="kpi-value" style="font-size:18px">${U.esc(m.orders)}<small>单</small></div></div>
+        <div class="kpi"><div class="kpi-label">通过率</div><div class="kpi-value" style="font-size:18px">${percent(m.passRate)}</div></div>
+        <div class="kpi"><div class="kpi-label">首期逾期率</div><div class="kpi-value" style="font-size:18px">${percent(m.firstOverdueRate)}</div></div>
+        <div class="kpi"><div class="kpi-label">坏账率</div><div class="kpi-value" style="font-size:18px">${percent(m.badDebtRate)}</div></div>
+      </div>
+      <div class="kv two">
+        <div class="kv-k">自动评级</div><div class="kv-v">${ratingPill(auto)}</div>
+        <div class="kv-k">生效评级</div><div class="kv-v">${ratingPill(current)}</div>
+        <div class="kv-k">待处理订单</div><div class="kv-v">${U.esc(s.pending || 0)} 单</div>
+        <div class="kv-k">逾期 / 累计放款</div><div class="kv-v">${U.esc(s.overdue || 0)} 单 · ${U.currency(s.payout || 0)}</div>
+      </div>
+      <div class="mini-note mt8">评级规则：A 正常；B / C 影响放款比例；D 为黑名单。人工修改评级必须填写原因，并写入操作日志。</div>
+      <div class="divider"></div>
+      <div class="section-title">门店操作日志 <span class="tag">${logs.length} 条</span></div>
+      ${logs.length ? `<div class="timeline">${logs.map(logHtml).join('')}</div>` : '<div class="mini-note">暂无门店操作日志</div>'}
+    `, `
+      <button class="btn" id="mClose">关闭</button>
+      ${canEditStore(s) ? '<button class="btn" id="mEdit">编辑门店</button>' : ''}
+      ${canAdminStores() ? '<button class="btn" id="mRating">修改评级</button>' : ''}
+      ${canAdminStores() ? `<button class="btn ${frozen ? 'primary' : 'danger'}" id="mStatus">${frozen ? '恢复门店' : '冻结门店'}</button>` : ''}
+      <a class="btn primary" href="admin-orders.html?store=${encodeURIComponent(s.id)}">查看订单</a>
+    `, 900);
+    $('#mClose').addEventListener('click', closeModal);
+    if ($('#mEdit')) $('#mEdit').addEventListener('click', () => openStoreForm(s.id));
+    if ($('#mRating')) $('#mRating').addEventListener('click', () => openRating(s.id));
+    if ($('#mStatus')) $('#mStatus').addEventListener('click', () => openStatus(s.id));
+  }
+
+  function openStoreForm(id) {
+    const editing = id != null;
+    const s = editing ? findStore(id) : null;
+    if (editing && !s) { U.toast('未找到该门店', 'err'); return; }
+    if (editing ? !canEditStore(s) : !canAdminStores()) { U.toast('当前角色无门店编辑权限', 'err'); return; }
+    const admin = canAdminStores();
+    const p = s && s.payee ? s.payee : {};
+    const type = s ? typeOf(s) : '合作店铺';
+    const currentRating = s ? ratingOf(s) : 'A';
+    const c = s ? contractOf(s) : {};
+    openModal(editing ? '编辑门店 · ' + s.name : '新增门店', `
+      <div class="form-grid">
+        <div class="field"><div class="label">门店编号<span class="req">*</span></div><input class="input${editing ? ' readonly' : ''}" id="nId" value="${U.esc(s ? s.id : '')}" placeholder="如 301"${editing ? ' readonly' : ''}></div>
+        <div class="field"><div class="label">门店名称<span class="req">*</span></div><input class="input" id="nName" value="${U.esc(s ? s.name : '')}" placeholder="如 Hanoi-New Store"></div>
+        <div class="field"><div class="label">门店类型<span class="req">*</span></div><select class="select" id="nType"${admin ? '' : ' disabled'}><option value="合作店铺"${type === '合作店铺' ? ' selected' : ''}>合作店铺</option><option value="自有店铺"${type === '自有店铺' ? ' selected' : ''}>自有店铺</option></select></div>
+        <div class="field"><div class="label">生效评级<span class="req">*</span></div><select class="select" id="nRating"${admin ? '' : ' disabled'}>${ratingOptions(currentRating)}</select>${editing ? `<div class="hint">自动评级：${U.esc(autoRatingOf(s))}；调整评级须填写原因并记录日志</div>` : '<div class="hint">新门店可设置初始评级，后续调整须填写原因</div>'}</div>
+        <div class="field"><div class="label">城市</div><input class="input" id="nCity" value="${U.esc(s ? s.city : '')}" placeholder="如 河内"></div>
+        <div class="field"><div class="label">联系人</div><input class="input" id="nContact" value="${U.esc(s ? s.contact : '')}" placeholder="如 Nguyễn Văn A"></div>
+        <div class="field full"><div class="label">地址</div><input class="input" id="nAddress" value="${U.esc(s ? s.address : '')}" placeholder="门店详细地址"></div>
+        <div class="field"><div class="label">联系电话</div><input class="input" id="nPhone" value="${U.esc(s ? s.phone : '')}" placeholder="如 0912345678"></div>
+        <div class="field"><div class="label">回收协议</div><select class="select" id="nAgreement">
+          <option value="待签署"${!s || s.agreement === '待签署' ? ' selected' : ''}>待签署</option>
+          <option value="已签署"${s && s.agreement === '已签署' ? ' selected' : ''}>已签署</option>
+          <option value="待续签"${s && s.agreement === '待续签' ? ' selected' : ''}>待续签</option>
+          <option value="无需签署"${type === '自有店铺' ? ' selected' : ''}>无需签署（自有店铺）</option>
+        </select></div>
+        <div class="field"><div class="label">收款人姓名</div><input class="input" id="nPayee" value="${U.esc(p.name || '')}" placeholder="与银行账户一致"></div>
+        <div class="field"><div class="label">收款账号</div><input class="input" id="nAccount" value="${U.esc(p.account || '')}" placeholder="银行账号"></div>
+        <div class="field"><div class="label">开户行</div><input class="input" id="nBank" value="${U.esc(p.bank || '')}" placeholder="如 Techcombank"></div>
+        <div class="field"><div class="label">门店合同<span class="req">*</span></div><input class="input" id="nContract" type="file" accept=".pdf,image/*" style="height:auto;padding:8px 11px"><div class="hint" id="contractHint">${c.name ? '当前：' + U.esc(c.name) + '；不选择文件则保留原合同' : '合作店铺与自有店铺均须上传 PDF 或图片合同'}</div></div>
+        ${editing ? `<div class="field full hide" id="ratingNoteWrap"><div class="label">评级调整原因<span class="req">*</span></div><textarea class="textarea" id="nRatingNote" placeholder="请说明人工调整评级的依据，操作将写入门店日志"></textarea></div>` : ''}
+      </div>
+      <div class="alert warn" id="typePolicy">${type === '自有店铺' ? '自有店铺无需签署回收协议，但仍须上传门店合同；审批流程与合作店铺一致。' : '合作店铺须上传门店合同并签署回收协议，订单按统一审批流程处理。'}</div>
+      <div class="mini-note mt8">新门店默认状态为「正常」。冻结与恢复请在门店详情中操作并填写原因。</div>
+    `, `
+      <button class="btn" id="mCancel">取消</button>
+      <button class="btn primary" id="saveStore">${editing ? '保存修改' : '保存门店'}</button>
+    `, 760);
+
+    function updateTypePolicy() {
+      const own = $('#nType').value === '自有店铺';
+      const agreement = $('#nAgreement');
+      agreement.disabled = own;
+      if (own) agreement.value = '无需签署';
+      else if (agreement.value === '无需签署') agreement.value = '待签署';
+      $('#typePolicy').textContent = own
+        ? '自有店铺无需签署回收协议，但仍须上传门店合同；审批流程与合作店铺一致。'
+        : '合作店铺须上传门店合同并签署回收协议，订单按统一审批流程处理。';
+    }
+    updateTypePolicy();
+    $('#nType').addEventListener('change', updateTypePolicy);
+    if (editing) {
+      $('#nRating').addEventListener('change', () => {
+        $('#ratingNoteWrap').classList.toggle('hide', $('#nRating').value === currentRating);
+      });
+    }
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#saveStore').addEventListener('click', async () => {
+      const storeId = $('#nId').value.trim();
+      const name = $('#nName').value.trim();
+      const nextType = $('#nType').value;
+      const nextRating = $('#nRating').value;
+      const ratingChanged = admin && editing && nextRating !== currentRating;
+      const ratingNote = editing ? $('#nRatingNote').value.trim() : '';
+      const file = $('#nContract').files[0];
+      if (!storeId) { U.toast('请填写门店编号', 'err'); return; }
+      if (!name) { U.toast('请填写门店名称', 'err'); return; }
+      if (!editing && allRows.some(x => sameId(x.id, storeId))) { U.toast('门店编号已存在', 'err'); return; }
+      if (!file && !c.name) { U.toast('请上传门店合同', 'err'); return; }
+      if (ratingChanged && !ratingNote) { U.toast('修改评级必须填写原因', 'err'); return; }
+      const payload = {
+        id: storeId,
+        name: name,
+        type: nextType,
+        status: editing ? statusOf(s) : '正常',
+        city: $('#nCity').value.trim() || '未填写',
+        address: $('#nAddress').value.trim(),
+        contact: $('#nContact').value.trim(),
+        phone: $('#nPhone').value.trim(),
+        agreement: nextType === '自有店铺' ? '无需签署' : $('#nAgreement').value,
+        payee: {
+          name: $('#nPayee').value.trim(),
+          account: $('#nAccount').value.trim(),
+          bank: $('#nBank').value.trim()
+        }
+      };
+      if (!editing) payload.rating = nextRating;
+      if (file) payload.contract = { name: file.name, size: file.size, at: API.now() };
+      else if (editing && s.contract) payload.contract = s.contract;
+      else if (editing && s.contractFile) payload.contractFile = s.contractFile;
+      else if (editing && c.name) payload.contract = c;
+      const btn = $('#saveStore');
+      btn.disabled = true;
+      btn.textContent = '保存中…';
+      try {
+        await API.saveStore(payload, actor(), editing ? '编辑门店资料' : '新增门店');
+        if (ratingChanged) await API.changeStoreRating(storeId, nextRating, ratingNote, actor());
+        closeModal();
+        await load();
+        U.toast(editing ? '门店资料已保存' : '门店已新增：' + name);
+        if (editing) openDetail(storeId);
+      } catch (err) {
+        U.toast(err.message || '保存失败', 'err');
+        btn.disabled = false;
+        btn.textContent = editing ? '保存修改' : '保存门店';
+      }
+    });
+  }
+
+  function openRating(id) {
+    if (!canAdminStores()) { U.toast('仅管理员可修改门店评级', 'err'); return; }
+    const s = findStore(id);
+    if (!s) { U.toast('未找到该门店', 'err'); return; }
+    const current = ratingOf(s);
+    const auto = autoRatingOf(s);
+    const m = metricsOf(s);
+    openModal('修改评级 · ' + s.name, `
+      <div class="kv two mb12">
+        <div class="kv-k">当前评级</div><div class="kv-v">${ratingPill(current)}</div>
+        <div class="kv-k">自动评级</div><div class="kv-v">${ratingPill(auto)}</div>
+      </div>
+      <div class="mini-note mb12">自动评级依据：进件量 ${U.esc(m.orders)} 单 · 通过率 ${percent(m.passRate)} · 首期逾期率 ${percent(m.firstOverdueRate)} · 坏账率 ${percent(m.badDebtRate)}</div>
+      <div class="field"><div class="label">调整为<span class="req">*</span></div><select class="select" id="ratingNext">${ratingOptions(current)}</select></div>
+      <div class="field"><div class="label">修改原因<span class="req">*</span></div><textarea class="textarea" id="ratingNote" placeholder="请填写人工调整原因与依据，保存后写入门店操作日志"></textarea></div>
+      <div class="alert warn">A 正常；B / C 影响放款比例；D 为黑名单。人工评级调整将保留操作人与原因，供后续复核。</div>
+    `, `
+      <button class="btn" id="mCancel">取消</button>
+      <button class="btn primary" id="saveRating">确认修改</button>
+    `, 600);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#saveRating').addEventListener('click', async () => {
+      const next = $('#ratingNext').value;
+      const note = $('#ratingNote').value.trim();
+      if (next === current) { U.toast('生效评级未发生变化', 'err'); return; }
+      if (!note) { U.toast('修改评级必须填写原因', 'err'); return; }
+      const btn = $('#saveRating');
+      btn.disabled = true;
+      btn.textContent = '保存中…';
+      try {
+        await API.changeStoreRating(id, next, note, actor());
+        closeModal();
+        await load();
+        openDetail(id);
+        U.toast(`门店评级已调整为 ${next}`);
+      } catch (err) {
+        U.toast(err.message || '评级修改失败', 'err');
+        btn.disabled = false;
+        btn.textContent = '确认修改';
+      }
+    });
+  }
+
+  function openStatus(id) {
+    if (!canAdminStores()) { U.toast('仅管理员可冻结或恢复门店', 'err'); return; }
+    const s = findStore(id);
+    if (!s) { U.toast('未找到该门店', 'err'); return; }
+    const frozen = statusOf(s) === '冻结';
+    const next = frozen ? '正常' : '冻结';
+    const action = frozen ? '恢复' : '冻结';
+    openModal(action + '门店 · ' + s.name, `
+      <div class="alert ${frozen ? 'info' : 'warn'} mb12">${frozen
+        ? '恢复后，门店可重新录入新单并按审批流程送财务；存量在贷订单保持正常还款。'
+        : '冻结后，门店不可录入新单、不可送财务；存量在贷订单继续还款。'}</div>
+      <div class="kv two mb12">
+        <div class="kv-k">当前状态</div><div class="kv-v">${statusPill(s)}</div>
+        <div class="kv-k">调整后</div><div class="kv-v"><span class="pill ${frozen ? 'green' : 'red'}">${next}</span></div>
+      </div>
+      <div class="field"><div class="label">${action}原因<span class="req">*</span></div><textarea class="textarea" id="statusNote" placeholder="请填写${action}原因，保存后写入门店操作日志"></textarea></div>
+    `, `
+      <button class="btn" id="mCancel">取消</button>
+      <button class="btn ${frozen ? 'primary' : 'danger-solid'}" id="saveStatus">确认${action}</button>
+    `, 560);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#saveStatus').addEventListener('click', async () => {
+      const note = $('#statusNote').value.trim();
+      if (!note) { U.toast(action + '门店必须填写原因', 'err'); return; }
+      const btn = $('#saveStatus');
+      btn.disabled = true;
+      btn.textContent = '提交中…';
+      try {
+        await API.changeStoreStatus(id, next, note, actor());
+        closeModal();
+        await load();
+        openDetail(id);
+        U.toast('门店已' + action);
+      } catch (err) {
+        U.toast(err.message || '状态修改失败', 'err');
+        btn.disabled = false;
+        btn.textContent = '确认' + action;
+      }
+    });
+  }
+
+  function applyFilters() {
+    state.q = $('#q').value.trim();
+    state.city = $('#city').value;
+    state.type = $('#type').value;
+    state.status = $('#status').value;
+    state.rating = $('#rating').value;
+    load();
+  }
+
+  $('#tbody').addEventListener('click', e => {
+    const edit = e.target.closest('[data-edit]');
+    if (edit) { openStoreForm(edit.dataset.edit); return; }
+    const detail = e.target.closest('[data-detail]');
+    if (detail) { openDetail(detail.dataset.detail); return; }
+    const tr = e.target.closest('tr[data-id]');
+    if (tr) openDetail(tr.dataset.id);
+  });
+
+  $('#searchBtn').addEventListener('click', applyFilters);
+  $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') applyFilters(); });
+  ['#city', '#type', '#status', '#rating'].forEach(sel => $(sel).addEventListener('change', applyFilters));
+  $('#clearBtn').addEventListener('click', () => {
+    $('#q').value = '';
+    $('#city').value = '';
+    $('#type').value = 'all';
+    $('#status').value = 'all';
+    $('#rating').value = 'all';
+    Object.assign(state, { q: '', city: '', type: 'all', status: 'all', rating: 'all' });
+    load();
+  });
+  $('#addBtn').classList.toggle('hide', !canAdminStores());
+  $('#addBtn').addEventListener('click', () => openStoreForm());
+  $('#modalClose').addEventListener('click', closeModal);
+  $('#overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  load();
+})();
+</script>
+</body>
+</html>

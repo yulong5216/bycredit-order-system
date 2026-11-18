@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BY Credit · 分期订单管理系统</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="login-wrap">
+  <section class="login-side">
+    <div class="login-brand">
+      <div class="login-mark">BY</div>
+      <div>
+        <div style="color:#fff;font-weight:600;font-size:15px">BY Credit</div>
+        <div style="font-size:11px;color:#7C8DA8;margin-top:2px">分期订单管理系统</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="login-title">把赊销订单从录单到回款，<br>装进一套系统里。</div>
+      <p class="login-desc">替代现有第三方预约订单平台。业务员移动端录单与资料采集；初审核对资料、发起电子签约、绑定 MDM；终审只做核对；财务统一审批与汇总打款；贷后用银行流水与账单自动对账。</p>
+      <div class="login-points">
+        <div class="lp"><span class="lp-dot"></span><div><b>签约前置</b><span>下载客户资料表格并人工上传 MobiFone，客户完成 KYC 与签署后，人工回填合同号和结果</span></div></div>
+        <div class="lp"><span class="lp-dot"></span><div><b>职责分离</b><span>初审=核资料/签约/绑 MDM；终审=核对；财务=审批与打款；贷后=流水对账</span></div></div>
+        <div class="lp"><span class="lp-dot"></span><div><b>放款可追溯</b><span>终审通过后批量送财务，汇总收款人/账号/机型/金额，回填银行回单</span></div></div>
+      </div>
+    </div>
+
+    <div class="login-foot">原型演示 · 数据均为脱敏示例 · 不连接任何真实接口</div>
+  </section>
+
+  <section class="login-panel">
+    <h2>选择角色进入</h2>
+    <div class="sub">登录后按角色进入固定工作界面，无业务员/审核员身份互换</div>
+
+    <div class="role-list">
+      <a class="role-card" href="admin-orders.html" onclick="localStorage.setItem('bycredit_role','admin')">
+        <div class="role-ico">管</div>
+        <div><div class="role-name">管理员</div><div class="role-desc">全部功能：订单池、审核、财务、贷后、门店与账号</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="sales-orders.html" onclick="localStorage.setItem('bycredit_role','sales')">
+        <div class="role-ico">业</div>
+        <div><div class="role-name">业务员（移动端）</div><div class="role-desc">移动录单、上传客户资料、查看本人订单进度</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="admin-stores.html" onclick="localStorage.setItem('bycredit_role','manager')">
+        <div class="role-ico">店</div>
+        <div><div class="role-name">门店店长</div><div class="role-desc">查看本店订单与业务员进度、维护本店资料</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="admin-orders.html?stage=first" onclick="localStorage.setItem('bycredit_role','first')">
+        <div class="role-ico">初</div>
+        <div><div class="role-name">初审专员</div><div class="role-desc">核对资料 · 签约表格上传登记与结果回填 · 绑定监管锁 · 初审通过</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="admin-orders.html?stage=final" onclick="localStorage.setItem('bycredit_role','final')">
+        <div class="role-ico">终</div>
+        <div><div class="role-name">终审专员</div><div class="role-desc">复核资料、放款信息与 MDM，通过后批量送财务</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="admin-finance.html" onclick="localStorage.setItem('bycredit_role','finance')">
+        <div class="role-ico">财</div>
+        <div><div class="role-name">财务</div><div class="role-desc">审批放款、导出财务明细、登记还款与回填银行回单</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="admin-bills.html?view=recon" onclick="localStorage.setItem('bycredit_role','aftercare')">
+        <div class="role-ico">贷</div>
+        <div><div class="role-name">贷后管理</div><div class="role-desc">流水对账、代客登记、延期与坏账管理</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="admin-bills.html" onclick="localStorage.setItem('bycredit_role','collector')">
+        <div class="role-ico">催</div>
+        <div><div class="role-name">催收专员</div><div class="role-desc">跟进逾期账单、登记催收记录与承诺还款</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+      <a class="role-card" href="mp-bill.html">
+        <div class="role-ico">客</div>
+        <div><div class="role-name">客户小程序</div><div class="role-desc">查看账单、生成收款码、模拟支付回调</div></div>
+        <div class="role-arrow">›</div>
+      </a>
+    </div>
+
+    <div class="alert info" style="margin-top:22px">
+      <span>演示说明</span>
+      <span>系统内置 16 条示例订单。所有审核、签约、财务、还款操作只写入本机浏览器 localStorage，可随时用页面顶部「重置数据」恢复。</span>
+    </div>
+  </section>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+</body>
+</html>

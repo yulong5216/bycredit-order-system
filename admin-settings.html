@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>系统对接 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">系统对接</div>
+          <div class="page-sub">电子签约与监管锁平台配置 · 人工跳转第三方后台操作，订单内回填结果并保留日志</div>
+        </div>
+        <div class="row">
+          <button class="btn" id="refreshBtn">刷新状态</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <span class="card-title">电子签约</span>
+            <span class="card-sub">MobiFone eContract · 导出表格 / 平台上传 / 签署结果回填</span>
+          </div>
+          <span id="esignPill"></span>
+        </div>
+        <div class="card-body">
+          <div class="kv" id="esignInfo"></div>
+          <div class="alert info mt12">
+            <span>说明</span>
+            <span>在订单详情下载客户资料表格，人工上传 MobiFone；客户完成 KYC 与签署后，再将合同号和签署结果回填本系统。不自动创建合同，也不假设平台提供结果回调。</span>
+          </div>
+          <div class="row mt16">
+            <button class="btn sm" data-test="esign">检查配置</button>
+            <button class="btn sm" data-edit="esign">修改配置</button>
+            <button class="btn sm danger" data-unbind="esign">解除绑定</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt16">
+        <div class="card-head">
+          <div>
+            <span class="card-title">监管锁（MDM）</span>
+            <span class="card-sub">准富 MDM · 人工绑定设备 / 回填 IMEI 与序列号 / 人工解锁</span>
+          </div>
+          <span id="mdmPill"></span>
+        </div>
+        <div class="card-body">
+          <div class="kv" id="mdmInfo"></div>
+          <div class="alert warn mt12">
+            <span>说明</span>
+            <span>准富未开放接口，且后台登录需要短信验证码，无法自动同步。操作员跳转准富后台完成绑定或锁机，再回填 IMEI 与序列号；系统只保留“已绑定 / 未绑定”，记录操作人与时间，不假设有绑定或锁机结果回调。</span>
+          </div>
+          <div class="row mt16">
+            <button class="btn sm" data-test="mdm">检查配置</button>
+            <button class="btn sm" data-edit="mdm">修改配置</button>
+            <button class="btn sm danger" data-unbind="mdm">解除绑定</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt16">
+        <div class="card-head">
+          <div>
+            <span class="card-title">操作记录</span>
+            <span class="card-sub">最近 7 天第三方平台人工操作概况（原型示意）</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table compact">
+            <thead>
+              <tr>
+                <th>服务</th>
+                <th>操作</th>
+                <th>用途</th>
+                <th class="t-right">处理次数</th>
+                <th class="t-right">完成率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>电子签约</td><td>下载客户资料表格</td><td>生成 MobiFone 上传资料</td><td class="t-right">128</td><td class="t-right">100%</td></tr>
+              <tr><td>电子签约</td><td>上传 MobiFone</td><td>人工创建签约任务并通知客户</td><td class="t-right">126</td><td class="t-right">98.4%</td></tr>
+              <tr><td>电子签约</td><td>回填签署结果</td><td>登记合同号、签署状态与时间</td><td class="t-right">124</td><td class="t-right">98.4%</td></tr>
+              <tr><td>监管锁</td><td>跳转准富后台</td><td>人工查询并绑定设备</td><td class="t-right">119</td><td class="t-right">100%</td></tr>
+              <tr><td>监管锁</td><td>回填 IMEI / 序列号</td><td>登记已绑定状态与操作日志</td><td class="t-right">117</td><td class="t-right">98.3%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-body" style="padding-top:12px">
+          <div class="mini-note">正式开发后，这里按订单号记录操作人、上传文件、回填结果与时间，便于追溯“客户未签署”“设备未绑定”等问题。</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modalTitle">修改配置</div>
+      <button class="x" id="modalClose">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  Shell.mount({ nav: 'settings', crumb: '运营与系统 / <b>系统对接</b>' });
+
+  const $ = s => document.querySelector(s);
+  const overlay = document.getElementById('overlay');
+  let data = null;
+
+  function pill(status) {
+    return status === 'bound'
+      ? '<span class="pill green">已绑定</span>'
+      : '<span class="pill gray">未绑定</span>';
+  }
+
+  function render() {
+    const e = data.esign;
+    const m = data.mdm;
+    $('#esignPill').innerHTML = pill(e.status);
+    $('#mdmPill').innerHTML = pill(m.status);
+    $('#esignInfo').innerHTML = `
+      <div class="kv-k">绑定状态</div><div class="kv-v">${pill(e.status)}</div>
+      <div class="kv-k">账号</div><div class="kv-v mono">${U.esc(e.account || '—')}</div>
+      <div class="kv-k">平台后台地址</div><div class="kv-v mono">${U.esc(e.api || '—')}</div>
+      <div class="kv-k">签约方式</div><div class="kv-v">下载客户资料表格，人工上传 MobiFone，签署后回填结果</div>
+      <div class="kv-k">绑定时间</div><div class="kv-v">${U.esc(e.boundAt || '—')}</div>
+      <div class="kv-k">更新时间</div><div class="kv-v">${U.esc(e.updatedAt || '—')}</div>`;
+
+    $('#mdmInfo').innerHTML = `
+      <div class="kv-k">绑定状态</div><div class="kv-v">${pill(m.status)}</div>
+      <div class="kv-k">账号</div><div class="kv-v mono">${U.esc(m.account || '—')}</div>
+      <div class="kv-k">平台后台地址</div><div class="kv-v mono">${U.esc(m.api || '—')}</div>
+      <div class="kv-k">接入方式</div><div class="kv-v">人工跳转 + 结果回填（无开放 API / 无结果回调）</div>
+      <div class="kv-k">状态</div><div class="kv-v">${m.status === 'bound' ? '<span class="pill green">启用</span>' : '<span class="pill gray">停用</span>'}</div>
+      <div class="kv-k">绑定时间</div><div class="kv-v">${U.esc(m.boundAt || '—')}</div>
+      <div class="kv-k">更新时间</div><div class="kv-v">${U.esc(m.updatedAt || '—')}</div>`;
+  }
+
+  async function load() {
+    data = await API.getIntegrations();
+    render();
+  }
+
+  function closeModal() { overlay.classList.remove('open'); }
+
+  function openEdit(key) {
+    const d = data[key];
+    $('#modalTitle').textContent = '修改配置 · ' + d.name;
+    $('#modalBody').innerHTML = `
+      <div class="field">
+        <div class="label">服务商</div>
+        <input class="input" id="fProvider" value="${U.esc(d.provider || '')}">
+      </div>
+      <div class="field">
+        <div class="label">账号<span class="req">*</span></div>
+        <input class="input mono" id="fAccount" value="${U.esc(d.account || '')}" placeholder="签约账号 / 监管锁账号">
+      </div>
+      <div class="field">
+        <div class="label">平台后台地址<span class="req">*</span></div>
+        <input class="input mono" id="fApi" value="${U.esc(d.api || '')}" placeholder="https://">
+      </div>
+      <div class="mini-note mt12">原型仅保存到当前浏览器，不包含真实密码与密钥。正式开发时密钥应加密存放在服务端，不下发到前端。</div>`;
+    $('#modalFoot').innerHTML = `
+      <button class="btn" data-close>取消</button>
+      <button class="btn primary" id="saveBtn">保存并启用</button>`;
+    overlay.classList.add('open');
+
+    $('#saveBtn').addEventListener('click', async () => {
+      const patch = {
+        provider: $('#fProvider').value.trim(),
+        account: $('#fAccount').value.trim(),
+        api: $('#fApi').value.trim()
+      };
+      if (!patch.account) { U.toast('请填写账号', 'err'); return; }
+      if (!patch.api) { U.toast('请填写平台后台地址', 'err'); return; }
+      try {
+        data = await API.saveIntegration(key, patch);
+        closeModal();
+        render();
+        U.toast('配置已保存并启用');
+      } catch (err) { U.toast(err.message, 'err'); }
+    });
+  }
+
+  document.addEventListener('click', async e => {
+    const testBtn = e.target.closest('[data-test]');
+    const editBtn = e.target.closest('[data-edit]');
+    const unbindBtn = e.target.closest('[data-unbind]');
+    const closeBtn = e.target.closest('[data-close]');
+
+    if (closeBtn) { closeModal(); return; }
+
+    if (testBtn) {
+      const key = testBtn.dataset.test;
+      testBtn.disabled = true;
+      try {
+        const r = await API.testIntegration(key);
+        U.toast(r.message);
+      } catch (err) { U.toast(err.message, 'err'); }
+      testBtn.disabled = false;
+      return;
+    }
+
+    if (editBtn) { openEdit(editBtn.dataset.edit); return; }
+
+    if (unbindBtn) {
+      const key = unbindBtn.dataset.unbind;
+      if (!confirm('解除绑定后，订单内将无法发起签约 / 绑定监管锁。确定解除？')) return;
+      try {
+        data = await API.unbindIntegration(key);
+        render();
+        U.toast('已解除绑定');
+      } catch (err) { U.toast(err.message, 'err'); }
+    }
+  });
+
+  $('#modalClose').addEventListener('click', closeModal);
+  overlay.addEventListener('click', e => { if (e.target.id === 'overlay') closeModal(); });
+  $('#refreshBtn').addEventListener('click', () => { load().then(() => U.toast('状态已刷新')); });
+
+  load();
+})();
+</script>
+</body>
+</html>

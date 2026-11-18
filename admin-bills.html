@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>账单管理 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">账单管理</div>
+          <div class="page-sub">按订单 + 期次代客登记还款与支付留痕；切换「按订单对账」可逐单核对银行流水与应还差额</div>
+        </div>
+        <div class="row">
+          <button class="btn" onclick="U.toast('原型阶段暂未接入银行流水导入')">导入银行流水</button>
+          <button class="btn primary" onclick="U.toast('已生成当月收款汇总（原型演示）')">生成收款汇总</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="tabs" id="viewTabs" style="border-bottom:0">
+          <div class="tab active" data-view="bills">按账单</div>
+          <div class="tab" data-view="recon">按订单对账</div>
+        </div>
+      </div>
+
+      <section id="viewBills">
+        <div class="kpis" id="kpis"></div>
+
+        <div class="card">
+          <div class="tabs" id="tabs"></div>
+          <div class="toolbar">
+            <div class="search"><input id="q" placeholder="搜索订单号 / 客户 / 电话"></div>
+            <input class="input mini" type="month" id="month">
+            <select class="select mini" id="store"><option value="">全部门店</option></select>
+            <button class="btn sm" id="searchBtn">查询</button>
+            <button class="btn sm ghost" id="clearBtn">清空</button>
+            <span class="faint small" style="margin-left:auto">状态口径：Pending 待还 / Paid 已还 / Deferred 延期 / Breach 逾期 / Settled 结清</span>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>账单 / 订单</th>
+                  <th>客户</th>
+                  <th>门店 / 业务员</th>
+                  <th>应还日</th>
+                  <th class="t-right">应还金额</th>
+                  <th class="t-right">实还金额</th>
+                  <th>状态</th>
+                  <th>支付渠道</th>
+                  <th>支付订单号</th>
+                  <th>支付时间</th>
+                  <th class="t-right">操作</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+          <div class="pager" id="pager"></div>
+        </div>
+      </section>
+
+      <section id="viewRecon" style="display:none">
+        <div class="alert info mb16">
+          <span>对账口径</span>
+          <span>应还 = 已到期账单金额（含已还）；银行流水 = 已标记「其他转账 / 线上QR」的实收金额，线下现金不计入；差额 = 银行流水 − 应还，负数表示少收，需人工核对。</span>
+        </div>
+
+        <div class="kpis" id="reconKpis"></div>
+
+        <div class="card">
+          <div class="tabs" id="reconTabs"></div>
+          <div class="toolbar">
+            <div class="search"><input id="reconQ" placeholder="订单号 / 客户 / 电话 / 机型"></div>
+            <button class="btn sm" id="reconSearchBtn">查询</button>
+            <button class="btn sm ghost" id="reconClearBtn">清空</button>
+            <span class="grow-line"></span>
+            <button class="btn sm" id="reconExportBtn">导出对账表</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>订单号</th>
+                  <th>客户 / 电话</th>
+                  <th>门店</th>
+                  <th>机型</th>
+                  <th>期数</th>
+                  <th class="t-right">应还</th>
+                  <th class="t-right">银行流水</th>
+                  <th class="t-right">差额</th>
+                  <th>最近入账</th>
+                  <th>订单状态</th>
+                  <th class="t-right">操作</th>
+                </tr>
+              </thead>
+              <tbody id="reconBody"></tbody>
+            </table>
+          </div>
+          <div class="pager" id="reconPager"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modalTitle">收款二维码</div>
+      <button class="x" id="modalClose">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  Shell.mount({ nav: 'bills', crumb: '业务办理 / <b>账单管理</b>' });
+
+  const $ = s => document.querySelector(s);
+  let currentOrderId = '';
+
+  /* ================= 视图切换 ================= */
+  const viewEls = { bills: $('#viewBills'), recon: $('#viewRecon') };
+  function switchView(v) {
+    if (!viewEls[v]) v = 'bills';
+    Object.keys(viewEls).forEach(k => { viewEls[k].style.display = k === v ? '' : 'none'; });
+    document.querySelectorAll('#viewTabs .tab').forEach(t => t.classList.toggle('active', t.dataset.view === v));
+  }
+  document.querySelectorAll('#viewTabs .tab').forEach(t => {
+    t.addEventListener('click', () => switchView(t.dataset.view));
+  });
+
+  /* ================= 按账单 ================= */
+  const billState = { page: 1, size: 12, status: 'all', q: U.qs('q') || '', month: '', store: '' };
+  const BILL_TABS = [
+    { key: 'all', label: '全部账单' },
+    { key: 'Pending', label: '待还' },
+    { key: 'Paid', label: '已还' },
+    { key: 'Deferred', label: '已延期' },
+    { key: 'Breach', label: '逾期' },
+    { key: 'Settled', label: '已结清' }
+  ];
+  if (billState.q) $('#q').value = billState.q;
+
+  MOCK.STORES.forEach(s => $('#store').insertAdjacentHTML('beforeend', `<option value="${s.id}">${U.esc(s.name)}</option>`));
+
+  function qrSvg(seed, size) {
+    size = size || 176;
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    const n = 25, cell = size / n;
+    let rects = '';
+    const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) / 4294967295); };
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const finder = (x < 7 && y < 7) || (x > n - 8 && y < 7) || (x < 7 && y > n - 8);
+        if (finder) continue;
+        if (rnd() > 0.55) rects += `<rect x="${(x * cell).toFixed(1)}" y="${(y * cell).toFixed(1)}" width="${cell.toFixed(1)}" height="${cell.toFixed(1)}"/>`;
+      }
+    }
+    const finderBox = (x, y) => `<rect x="${x}" y="${y}" width="${7 * cell}" height="${7 * cell}" fill="#fff"/><rect x="${x + cell}" y="${y + cell}" width="${5 * cell}" height="${5 * cell}"/><rect x="${x + 2 * cell}" y="${y + 2 * cell}" width="${3 * cell}" height="${3 * cell}" fill="#fff"/><rect x="${x + 2.6 * cell}" y="${y + 2.6 * cell}" width="${1.8 * cell}" height="${1.8 * cell}"/>`;
+    return `<svg class="qr-img" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg" style="fill:#0F1B2D">
+      <rect width="${size}" height="${size}" fill="#fff"/>
+      ${rects}
+      ${finderBox(0, 0)}${finderBox(size - 7 * cell, 0)}${finderBox(0, size - 7 * cell)}
+    </svg>`;
+  }
+
+  function renderBillTabs() {
+    $('#tabs').innerHTML = BILL_TABS.map(t => `<div class="tab ${billState.status === t.key ? 'active' : ''}" data-status="${t.key}">${t.label}</div>`).join('');
+    $('#tabs').querySelectorAll('.tab').forEach(el => el.addEventListener('click', () => { billState.status = el.dataset.status; billState.page = 1; loadBills(); }));
+  }
+
+  function renderBillKpis(s) {
+    const list = [
+      { label: '筛选范围内应还', value: U.currency(s.due), foot: '含已还 + 待还，不含已结清期次' },
+      { label: '已还金额', value: U.currency(s.paid), foot: '含线上QR、其他转账与线下现金' },
+      { label: '逾期金额', value: U.currency(s.overdue), foot: s.overdueCount + ' 笔账单已逾期', tone: s.overdue ? 'down' : '' },
+      { label: '账单笔数', value: s.count + ' 笔', foot: '按订单 + 期次拆分' }
+    ];
+    $('#kpis').innerHTML = list.map(k => `<div class="kpi">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value" style="font-size:19px">${k.value}</div>
+      <div class="kpi-foot ${k.tone || ''}">${k.foot}</div></div>`).join('');
+  }
+
+  function actions(r) {
+    const btn = [];
+    if (['Pending', 'Deferred', 'Breach'].indexOf(r.status) > -1) {
+      btn.push(`<button class="btn sm" data-act="qr" data-o="${r.orderId}" data-p="${r.period}">收款码</button>`);
+      if (Shell.can('代客登记还款')) btn.push(`<button class="btn sm primary" data-act="pay" data-o="${r.orderId}" data-p="${r.period}">代客登记</button>`);
+    }
+    if (r.status === 'Pending' && Shell.can('延期')) {
+      btn.push(`<button class="btn sm ghost" data-act="defer" data-o="${r.orderId}" data-p="${r.period}">延期</button>`);
+    }
+    if ((r.status === 'Pending' || r.status === 'Deferred') && Shell.can('标记坏账')) {
+      btn.push(`<button class="btn sm ghost" data-act="breach" data-o="${r.orderId}" data-p="${r.period}">标记坏账</button>`);
+    }
+    if (r.status === 'Paid') btn.push(`<span class="faint small">已完成</span>`);
+    if (r.status === 'Settled') btn.push(`<span class="faint small">已结清</span>`);
+    if (r.status === 'Breach') btn.push(`<a class="btn sm ghost" href="admin-order-detail.html?id=${r.orderId}">催收跟进</a>`);
+    return btn.join(' ');
+  }
+
+  function billRow(r) {
+    const overdueDays = r.status === 'Breach'
+      ? Math.max(1, Math.round((Date.now() - new Date(r.dueDate + 'T00:00:00')) / 86400000)) : 0;
+    return `<tr onclick="location.href='admin-order-detail.html?id=${r.orderId}'">
+      <td>
+        <div class="strong">第 ${r.period} / ${r.periods} 期</div>
+        <div class="sub mono">${U.esc(r.orderNo)}</div>
+      </td>
+      <td>
+        <div>${U.esc(r.customer)}</div>
+        <div class="sub">${U.esc(r.phone)} · ${U.esc(r.model)}</div>
+      </td>
+      <td>
+        <div>${U.esc(r.storeName)}</div>
+        <div class="sub">${U.esc(r.salesName)}</div>
+      </td>
+      <td class="mono t-nowrap">${U.esc(r.dueDate)}${overdueDays ? `<div class="sub" style="color:#B42318">逾期 ${overdueDays} 天</div>` : ''}</td>
+      <td class="t-right money strong">${U.money(r.amount)}</td>
+      <td class="t-right money">${r.paidAmount ? U.money(r.paidAmount) : '—'}</td>
+      <td>${U.billPill(r.status)}${r.note ? `<div class="sub">${U.esc(r.note)}</div>` : ''}</td>
+      <td>${U.esc(r.channel || '—')}</td>
+      <td class="mono small">${U.esc(r.txnNo || '—')}</td>
+      <td class="mono small t-nowrap">${U.esc(r.paidAt || '—')}</td>
+      <td class="t-right t-nowrap" onclick="event.stopPropagation()">${actions(r)}</td>
+    </tr>`;
+  }
+
+  function closeModal() { $('#overlay').classList.remove('open'); }
+
+  function localDateTime() {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  }
+
+  async function openPayment(orderId, period) {
+    const o = await API.getOrder(orderId);
+    const b = o.bills.find(x => x.period === period);
+    $('#modalTitle').textContent = `代客登记还款 · ${o.no} · 第 ${period} 期`;
+    $('#modalBody').innerHTML = `
+      <div class="alert info mb12"><span>登记账单</span><span>第 ${period}/${o.bills.length} 期 · 应还 ${U.esc(b.dueDate)} · 金额 <b>${U.currency(b.amount)}</b></span></div>
+      <div class="field"><div class="label">支付订单号<span class="req">*</span></div><input class="input mono" id="payTxnNo" placeholder="银行流水号 / 转账参考号 / 现金收据号"></div>
+      <div class="form-grid">
+        <div class="field"><div class="label">支付渠道<span class="req">*</span></div><select class="select" id="payChannel"><option value="线上QR">线上QR</option><option value="其他转账" selected>其他转账</option><option value="线下现金">线下现金</option></select></div>
+        <div class="field"><div class="label">支付时间<span class="req">*</span></div><input class="input" type="datetime-local" id="payAt" value="${localDateTime()}"></div>
+      </div>
+      <div class="field"><div class="label">登记备注</div><textarea class="textarea" id="payNote" placeholder="可填写线下收款、流水核对等说明"></textarea></div>
+      <div class="mini-note">支付时间即实际扣款 / 收款时间；保存后同步写入订单操作日志。</div>`;
+    $('#modalFoot').innerHTML = `<button class="btn" id="mCancel">取消</button><button class="btn primary" id="savePayment">确认登记</button>`;
+    $('#overlay').classList.add('open');
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#savePayment').addEventListener('click', async () => {
+      const txnNo = $('#payTxnNo').value.trim();
+      const paidAt = $('#payAt').value;
+      if (!txnNo) { U.toast('请填写支付订单号', 'err'); return; }
+      if (!paidAt) { U.toast('请选择支付时间', 'err'); return; }
+      const btn = $('#savePayment'); btn.disabled = true;
+      try {
+        await API.payBill(orderId, period, {
+          channel: $('#payChannel').value, txnNo, paidAt, note: $('#payNote').value.trim(),
+          manual: true, by: Shell.roleInfo().name, role: Shell.role()
+        });
+        closeModal(); U.toast('还款已登记，支付信息与日志已保存'); loadBills(); loadRecon();
+      } catch (err) { U.toast(err.message, 'err'); btn.disabled = false; }
+    });
+  }
+
+  function openDefer(orderId, period) {
+    $('#modalTitle').textContent = '办理延期 · 第 ' + period + ' 期';
+    $('#modalBody').innerHTML = `
+      <div class="field"><div class="label">延期天数<span class="req">*</span></div><input class="input" type="number" id="deferDays" min="1" max="30" value="8"></div>
+      <div class="field"><div class="label">延期原因<span class="req">*</span></div><textarea class="textarea" id="deferNote" placeholder="请填写客户申请与审批依据"></textarea></div>
+      <div class="mini-note">延期原因会写入账单备注和订单操作日志。</div>`;
+    $('#modalFoot').innerHTML = `<button class="btn" id="mCancel">取消</button><button class="btn primary" id="saveDefer">确认延期</button>`;
+    $('#overlay').classList.add('open');
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#saveDefer').addEventListener('click', async () => {
+      const days = Number($('#deferDays').value), note = $('#deferNote').value.trim();
+      if (!note) { U.toast('请填写延期原因', 'err'); return; }
+      const btn = $('#saveDefer'); btn.disabled = true;
+      try {
+        await API.deferBill(orderId, period, days, note, Shell.roleInfo().name);
+        closeModal(); U.toast('延期已登记并写入日志'); loadBills(); loadRecon();
+      } catch (err) { U.toast(err.message, 'err'); btn.disabled = false; }
+    });
+  }
+
+  function openBreach(orderId, period) {
+    $('#modalTitle').textContent = '标记坏账 · 第 ' + period + ' 期';
+    $('#modalBody').innerHTML = `
+      <div class="alert warn mb12"><span>注意</span><span>该操作会影响订单风险状态，请确认已完成催收跟进。</span></div>
+      <div class="field"><div class="label">坏账原因<span class="req">*</span></div><textarea class="textarea" id="breachNote" placeholder="请填写逾期情况、催收结果与标记依据"></textarea></div>`;
+    $('#modalFoot').innerHTML = `<button class="btn" id="mCancel">取消</button><button class="btn danger" id="saveBreach">确认标记</button>`;
+    $('#overlay').classList.add('open');
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#saveBreach').addEventListener('click', async () => {
+      const note = $('#breachNote').value.trim();
+      if (!note) { U.toast('请填写坏账原因', 'err'); return; }
+      const btn = $('#saveBreach'); btn.disabled = true;
+      try {
+        await API.markBreach(orderId, period, note, Shell.roleInfo().name);
+        closeModal(); U.toast('已标记并写入订单日志'); loadBills(); loadRecon();
+      } catch (err) { U.toast(err.message, 'err'); btn.disabled = false; }
+    });
+  }
+
+  function bindBillActions() {
+    $('#tbody').querySelectorAll('[data-act]').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const act = btn.dataset.act, oid = btn.dataset.o, period = Number(btn.dataset.p);
+      try {
+        if (act === 'pay') await openPayment(oid, period);
+        else if (act === 'defer') openDefer(oid, period);
+        else if (act === 'breach') openBreach(oid, period);
+        else if (act === 'qr') await openQR(oid, period);
+      } catch (err) { U.toast(err.message || '操作失败', 'err'); }
+    }));
+  }
+
+  async function openQR(orderId, period) {
+    const o = await API.getOrder(orderId);
+    const b = o.bills.find(x => x.period === period);
+    $('#modalTitle').textContent = '收款二维码 · 第 ' + period + ' 期';
+    $('#modalBody').innerHTML = `
+      <div style="text-align:center">
+        ${qrSvg(orderId + '-' + period)}
+        <div class="money-lg mt12">${U.currency(b.amount)}</div>
+        <div class="small faint">${U.esc(o.no)} · 第 ${period}/${o.bills.length} 期 · 应还 ${b.dueDate}</div>
+        <div class="qr-tip">客户扫码后跳转第三方支付收银台，支付成功回调按「订单号 + P期次」自动销账。</div>
+      </div>
+      <div class="alert info mt12"><span>回调示例</span><span class="mono small">POST /api/pay/callback { order_no: "${o.no}", period: "${period}", amount: ${b.amount}, status: "SUCCESS" }</span></div>`;
+    $('#modalFoot').innerHTML = `
+      <button class="btn" onclick="document.getElementById('overlay').classList.remove('open')">关闭</button>
+      <button class="btn primary" id="btnCallback">模拟支付成功回调</button>`;
+    $('#overlay').classList.add('open');
+    $('#btnCallback').addEventListener('click', async () => {
+      await API.payBill(orderId, period, { channel: '线上QR', manual: false });
+      $('#overlay').classList.remove('open');
+      U.toast('收到支付成功回调，账单已自动销账'); loadBills(); loadRecon();
+    });
+  }
+
+  async function loadBills() {
+    $('#tbody').innerHTML = `<tr><td colspan="11"><div class="empty">加载中…</div></td></tr>`;
+    const res = await API.listBills(billState);
+    renderBillTabs();
+    renderBillKpis(res.summary);
+    if (!res.items.length) {
+      $('#tbody').innerHTML = `<tr><td colspan="11"><div class="empty"><div class="empty-mark">∅</div>没有符合条件的账单</div></td></tr>`;
+    } else {
+      $('#tbody').innerHTML = res.items.map(billRow).join('');
+      bindBillActions();
+    }
+    const pages = Math.max(1, Math.ceil(res.total / billState.size));
+    let btns = `<button class="pg" ${billState.page === 1 ? 'disabled' : ''} data-p="${billState.page - 1}">上一页</button>`;
+    for (let i = 1; i <= pages; i++) btns += `<button class="pg ${i === billState.page ? 'active' : ''}" data-p="${i}">${i}</button>`;
+    btns += `<button class="pg" ${billState.page === pages ? 'disabled' : ''} data-p="${billState.page + 1}">下一页</button>`;
+    $('#pager').innerHTML = `<span>共 ${res.total} 笔 · 第 ${billState.page} / ${pages} 页</span><div class="pager-btns">${btns}</div>`;
+    $('#pager').querySelectorAll('.pg').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return; billState.page = Number(b.dataset.p); loadBills();
+    }));
+  }
+
+  $('#searchBtn').addEventListener('click', () => {
+    billState.q = $('#q').value; billState.month = $('#month').value; billState.store = $('#store').value;
+    billState.page = 1; loadBills();
+  });
+  $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') $('#searchBtn').click(); });
+  $('#clearBtn').addEventListener('click', () => {
+    ['q', 'month', 'store'].forEach(id => $('#' + id).value = '');
+    billState.q = billState.month = billState.store = ''; billState.page = 1; loadBills();
+  });
+
+  /* ================= 按订单对账 ================= */
+  const reconState = { q: U.qs('q') || '', status: 'all', page: 1, size: 12 };
+  const RECON_TABS = [
+    { key: 'all', label: '全部' },
+    { key: 'diff', label: '有差额' },
+    { key: 'short', label: '少收' },
+    { key: 'ok', label: '已平' }
+  ];
+  if (reconState.q) $('#reconQ').value = reconState.q;
+
+  function renderReconTabs() {
+    $('#reconTabs').innerHTML = RECON_TABS.map(t =>
+      `<div class="tab ${reconState.status === t.key ? 'active' : ''}" data-status="${t.key}">${t.label}</div>`
+    ).join('');
+    $('#reconTabs').querySelectorAll('.tab').forEach(el => el.addEventListener('click', () => {
+      reconState.status = el.dataset.status;
+      reconState.page = 1;
+      loadRecon();
+    }));
+  }
+
+  function renderReconKpis(s) {
+    const list = [
+      { label: '应还合计', value: U.currency(s.dueAmount), foot: '已到期账单金额（含已还）' },
+      { label: '银行流水合计', value: U.currency(s.bankPaid), foot: '其他转账 + 线上QR，不含线下现金' },
+      {
+        label: '差额合计', value: U.currency(s.diffAmount),
+        foot: s.diffAmount < 0 ? '整体少收，请优先核对' : (s.diffAmount > 0 ? '整体多收，需确认来源' : '账实一致'),
+        danger: s.diffAmount < 0
+      },
+      { label: '有差异订单数', value: s.diffCount + ' 单', foot: '存在差额、需人工核对的订单' }
+    ];
+    $('#reconKpis').innerHTML = list.map(k => `<div class="kpi">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value" style="font-size:19px${k.danger ? ';color:#D92D20' : ''}">${k.value}</div>
+      <div class="kpi-foot${k.danger ? ' down' : ''}">${k.foot}</div>
+    </div>`).join('');
+  }
+
+  function diffCell(d) {
+    if (!d) return '<span class="faint money">0 ₫</span>';
+    const color = d > 0 ? '#0E9F6E' : '#D92D20';
+    return `<span class="money strong" style="color:${color}">${d > 0 ? '+' : ''}${U.currency(d)}</span>`;
+  }
+
+  function reconRow(r) {
+    return `<tr onclick="location.href='admin-order-detail.html?id=${encodeURIComponent(r.orderId)}'">
+      <td class="mono strong">${U.esc(r.orderNo)}</td>
+      <td>
+        <div>${U.esc(r.customer)}</div>
+        <div class="sub">${U.esc(r.phone)}</div>
+      </td>
+      <td>${U.esc(r.storeName)}</td>
+      <td class="small">${U.esc(r.model)}</td>
+      <td>
+        <div>${r.duePeriods} / ${r.periods} 期</div>
+        <div class="sub money">每期 ${U.money(r.perPeriod)}</div>
+      </td>
+      <td class="t-right money">${U.currency(r.dueAmount)}</td>
+      <td class="t-right money">${U.currency(r.bankPaid)}</td>
+      <td class="t-right">${diffCell(r.diff)}</td>
+      <td class="mono small">${U.esc(r.lastPaidAt || '—')}</td>
+      <td>${U.pill(r.orderStatus)}</td>
+      <td class="t-right t-nowrap" onclick="event.stopPropagation()">
+        <button class="btn sm" data-note="${U.esc(r.orderId)}" data-no="${U.esc(r.orderNo)}">添加备注</button>
+        <a class="btn sm ghost" href="admin-order-detail.html?id=${encodeURIComponent(r.orderId)}">查看订单</a>
+      </td>
+    </tr>`;
+  }
+
+  async function loadRecon() {
+    $('#reconBody').innerHTML = `<tr><td colspan="11"><div class="empty">加载中…</div></td></tr>`;
+    const res = await API.listRecon({
+      q: reconState.q, status: reconState.status, page: reconState.page, size: reconState.size
+    });
+    renderReconTabs();
+    renderReconKpis(res.summary);
+    if (!res.items.length) {
+      $('#reconBody').innerHTML = `<tr><td colspan="11"><div class="empty"><div class="empty-mark">∅</div>没有符合条件的对账订单，试试清空筛选条件</div></td></tr>`;
+    } else {
+      $('#reconBody').innerHTML = res.items.map(reconRow).join('');
+      $('#reconBody').querySelectorAll('[data-note]').forEach(btn => {
+        btn.addEventListener('click', () => openNote(btn.dataset.note, btn.dataset.no));
+      });
+    }
+
+    const pages = Math.max(1, Math.ceil(res.total / reconState.size));
+    let btns = `<button class="pg" ${reconState.page === 1 ? 'disabled' : ''} data-p="${reconState.page - 1}">上一页</button>`;
+    for (let i = 1; i <= pages; i++) {
+      btns += `<button class="pg ${i === reconState.page ? 'active' : ''}" data-p="${i}">${i}</button>`;
+    }
+    btns += `<button class="pg" ${reconState.page === pages ? 'disabled' : ''} data-p="${reconState.page + 1}">下一页</button>`;
+    $('#reconPager').innerHTML = `<span>共 ${res.total} 单 · ${res.summary.diffCount} 单有差额 · 第 ${reconState.page} / ${pages} 页</span><div class="pager-btns">${btns}</div>`;
+    $('#reconPager').querySelectorAll('.pg').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      reconState.page = Number(b.dataset.p);
+      loadRecon();
+    }));
+  }
+
+  function openNote(orderId, orderNo) {
+    currentOrderId = orderId;
+    $('#modalTitle').textContent = '添加对账备注 · ' + orderNo;
+    $('#modalBody').innerHTML = `
+      <div class="field">
+        <div class="label">备注内容<span class="req">*</span></div>
+        <textarea class="textarea" id="noteText" placeholder="如：客户 11-03 已转账 2,000,000 ₫，银行流水次日记入，待补录"></textarea>
+      </div>
+      <div class="mini-note">备注会写入该订单的沟通记录，供财务与贷后复核时追溯。</div>`;
+    $('#modalFoot').innerHTML = `
+      <button class="btn" id="mCancel">取消</button>
+      <button class="btn primary" id="saveNote">保存备注</button>`;
+    $('#overlay').classList.add('open');
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#saveNote').addEventListener('click', async () => {
+      const text = $('#noteText').value.trim();
+      if (!text) { U.toast('请填写备注内容', 'err'); return; }
+      await API.addNote(currentOrderId, text, Shell.roleInfo().name);
+      closeModal();
+      U.toast('备注已保存');
+      loadRecon();
+    });
+  }
+
+  $('#reconSearchBtn').addEventListener('click', () => {
+    reconState.q = $('#reconQ').value.trim();
+    reconState.page = 1;
+    loadRecon();
+  });
+  $('#reconQ').addEventListener('keydown', e => { if (e.key === 'Enter') $('#reconSearchBtn').click(); });
+  $('#reconClearBtn').addEventListener('click', () => {
+    $('#reconQ').value = '';
+    reconState.q = '';
+    reconState.page = 1;
+    loadRecon();
+  });
+  $('#reconExportBtn').addEventListener('click', () => {
+    U.toast('原型阶段暂未接入导出，可按当前筛选结果核对');
+  });
+
+  $('#modalClose').addEventListener('click', closeModal);
+  $('#overlay').addEventListener('click', e => { if (e.target.id === 'overlay') e.target.classList.remove('open'); });
+
+  switchView(U.qs('view') === 'recon' ? 'recon' : 'bills');
+  loadBills();
+  loadRecon();
+})();
+</script>
+</body>
+</html>

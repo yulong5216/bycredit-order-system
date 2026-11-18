@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>我的账单 · BY Credit 小程序</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body style="background:#DDE4EF">
+<div class="mp-stage">
+  <div class="mp-app">
+    <div class="mp-status">
+      <span>9:41</span>
+      <span>BY Credit</span>
+      <span>●●●</span>
+    </div>
+    <div class="mp-head">
+      <div class="grow">
+        <div class="m-title" style="font-size:15px">账单助手</div>
+        <div class="m-sub" id="mpSub">分期还款 · 安全支付</div>
+      </div>
+      <button type="button" class="btn sm" id="headBind">换绑手机号</button>
+    </div>
+    <div class="mp-body" id="body"></div>
+    <nav class="m-tabbar" id="mpTabs">
+      <button type="button" class="m-tab active" data-view="bill" style="border:0;background:transparent"><i></i>查账</button>
+      <button type="button" class="m-tab" data-view="mine" style="border:0;background:transparent"><i></i>我的</button>
+    </nav>
+    <div class="overlay" id="bindOverlay" style="padding:18px">
+      <div class="modal" style="max-width:350px">
+        <div class="modal-head">
+          <div class="modal-title">换绑手机号</div>
+          <button type="button" class="x" id="bindClose">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="field"><div class="label">新手机号</div>
+            <input class="input" id="bindPhone" type="tel" placeholder="请输入下单时使用的手机号"></div>
+          <div class="field"><div class="label">短信验证码</div>
+            <div class="row" style="gap:8px">
+              <input class="input grow" id="bindCode" inputmode="numeric" placeholder="6 位验证码">
+              <button type="button" class="btn" id="btnSendCode" style="flex:0 0 104px">获取验证码</button>
+            </div></div>
+          <div class="hint">原型短信验证码：123456</div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn" id="bindCancel">取消</button>
+          <button type="button" class="btn primary" id="bindSave">保存并刷新</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  let orderId = params.get('order') || 'o8';
+  const $ = s => document.querySelector(s);
+  let order = null;
+  let myOrders = [];
+  let view = 'bill';
+  let customerPhone = (localStorage.getItem('bycredit_customer_phone') || '0961920398').trim();
+  let targetPeriod = Number(params.get('period') || 0);
+  let paying = false;
+
+  function qrSvg(seed, size) {
+    size = size || 176;
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    const n = 25, cell = size / n;
+    let rects = '';
+    const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) / 4294967295); };
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const finder = (x < 7 && y < 7) || (x > n - 8 && y < 7) || (x < 7 && y > n - 8);
+      if (finder || rnd() <= 0.55) continue;
+      rects += `<rect x="${(x * cell).toFixed(1)}" y="${(y * cell).toFixed(1)}" width="${cell.toFixed(1)}" height="${cell.toFixed(1)}"/>`;
+    }
+    const finderBox = (x, y) => `<rect x="${x}" y="${y}" width="${7 * cell}" height="${7 * cell}" fill="#fff"/><rect x="${x + cell}" y="${y + cell}" width="${5 * cell}" height="${5 * cell}"/><rect x="${x + 2 * cell}" y="${y + 2 * cell}" width="${3 * cell}" height="${3 * cell}" fill="#fff"/><rect x="${x + 2.6 * cell}" y="${y + 2.6 * cell}" width="${1.8 * cell}" height="${1.8 * cell}"/>`;
+    return `<svg class="qr-img" viewBox="0 0 ${size} ${size}" style="fill:#0F1B2D" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${size}" height="${size}" fill="#fff"/>${rects}
+      ${finderBox(0, 0)}${finderBox(size - 7 * cell, 0)}${finderBox(0, size - 7 * cell)}</svg>`;
+  }
+
+  function setActiveTab() {
+    document.querySelectorAll('#mpTabs [data-view]').forEach(el => {
+      el.classList.toggle('active', el.dataset.view === view);
+    });
+  }
+
+  async function loadMyOrders() {
+    const res = await API.listOrders({ q: customerPhone, size: 99 });
+    myOrders = res.items.filter(o => String(o.customer.phone || '') === customerPhone);
+  }
+
+  function currentBill() {
+    if (targetPeriod) {
+      const b = order.bills.find(x => x.period === targetPeriod);
+      if (b) return b;
+    }
+    return order.bills.find(b => b.status === 'Breach')
+      || order.bills.find(b => b.status === 'Pending' || b.status === 'Deferred')
+      || order.bills[order.bills.length - 1];
+  }
+
+  function renderEmptyBill() {
+    view = 'bill';
+    setActiveTab();
+    $('#mpSub').textContent = customerPhone + ' · 暂无订单';
+    $('#body').innerHTML = `<div class="empty" style="padding-top:70px">
+      <div class="empty-mark">∅</div>
+      <div>当前手机号未找到订单</div>
+      <div class="small faint mt8">请先换绑为下单时使用的手机号</div>
+      <button type="button" class="btn primary mt16" id="emptyBind">换绑手机号</button>
+    </div>`;
+    $('#emptyBind').addEventListener('click', openBind);
+  }
+
+  function render() {
+    if (!order) { renderEmptyBill(); return; }
+    view = 'bill';
+    setActiveTab();
+    const o = order;
+    const b = currentBill();
+    const paidAll = o.bills.every(x => x.status === 'Paid' || x.status === 'Settled');
+    $('#mpSub').textContent = o.customer.name + ' · ' + o.no.slice(-6);
+    $('#body').innerHTML = `
+      <div class="mp-hero">
+        <div class="mp-label">${paidAll ? '全部账单已结清' : `第 ${b.period} 期应还金额`}</div>
+        <div class="mp-amount">${paidAll ? U.currency(o.bills.reduce((s, x) => s + x.amount, 0)) : U.currency(b.amount)}<small> ₫</small></div>
+        <div class="mp-hero-row">
+          <span>${U.esc(o.customer.name)} · ${U.esc(o.device.model)}</span>
+          <span>${paidAll ? '无待还' : '应还日 ' + b.dueDate}</span>
+        </div>
+      </div>
+
+      ${paidAll ? `<div class="mp-success"><div class="ok-mark">✓</div>
+        <div style="font-weight:600">已全部结清</div>
+        <div class="small faint mt8">感谢您的按时还款，可继续在门店办理新分期。</div></div>`
+      : b.status === 'Paid' ? `<div class="mp-success"><div class="ok-mark">✓</div>
+        <div style="font-weight:600">本期已还款</div>
+        <div class="small faint mt8">${U.esc(b.paidAt)} · ${U.esc(b.channel)}</div></div>`
+      : `<div class="mp-actions" id="actions">
+          <button class="btn primary block" id="btnPay" style="height:46px;font-size:15px;border-radius:11px;margin-top:12px">立即还款 ${U.currency(b.amount)}</button>
+        </div>`}
+
+      <div style="margin:14px 0 6px;font-size:12px;color:#64748B;font-weight:600">全部账单</div>
+      ${o.bills.map(x => `<div class="mp-bill">
+        <div><div class="p">第 ${x.period} 期</div><div class="d">${x.dueDate}${x.note ? ' · ' + U.esc(x.note) : ''}</div></div>
+        <div><div class="amt">${U.money(x.amount)}</div><div style="text-align:right;margin-top:3px">${U.billPill(x.status)}</div></div>
+      </div>`).join('')}
+
+      <div class="small faint" style="text-align:center;margin:16px 0 6px;line-height:1.8">
+        还款成功后由支付平台回调业务系统自动销账<br>
+        如已转账未更新，请联系门店客服
+      </div>`;
+
+    const btn = $('#btnPay');
+    if (btn) btn.addEventListener('click', () => showPay(b));
+  }
+
+  function renderMine() {
+    view = 'mine';
+    setActiveTab();
+    $('#mpSub').textContent = 'Zalo 手机号 · ' + customerPhone;
+    $('#body').innerHTML = `
+      <div class="mp-bill" style="display:block;padding:16px">
+        <div class="small faint">当前绑定手机号</div>
+        <div style="font-size:20px;font-weight:650;margin-top:5px" class="mono">${U.esc(customerPhone)}</div>
+        <div class="small faint mt8">号码来自 Zalo 绑定信息，仅展示该手机号完全匹配的订单。</div>
+        <button type="button" class="btn block mt12" id="btnBind">换绑手机号</button>
+      </div>
+      <div style="margin:14px 0 6px;font-size:12px;color:#64748B;font-weight:600">我的订单（${myOrders.length}）</div>
+      ${myOrders.length ? myOrders.map(o => `<div class="mp-bill" data-order="${U.esc(o.id)}" style="cursor:pointer;${order && order.id === o.id ? 'border:1px solid #155EEF;' : ''}">
+        <div>
+          <div class="p">${U.esc(o.device.model)} ${U.esc(o.device.capacity)}</div>
+          <div class="d mono">${U.esc(o.no)}</div>
+          <div class="d">${o.plan.periods} 期 · ${U.currency(o.plan.perPeriod)} / 期</div>
+        </div>
+        <div style="text-align:right">${U.pill(o.status)}<div class="d mt8">点击查账</div></div>
+      </div>`).join('') : `<div class="alert warn"><span>提示</span><span>未找到当前手机号的订单，请先换绑为下单时使用的手机号。</span></div>`}`;
+    $('#btnBind').addEventListener('click', openBind);
+    document.querySelectorAll('[data-order]').forEach(el => el.addEventListener('click', () => {
+      const selected = myOrders.find(o => o.id === el.dataset.order);
+      if (!selected) return;
+      order = selected;
+      orderId = selected.id;
+      targetPeriod = 0;
+      render();
+    }));
+  }
+
+  function openBind() {
+    $('#bindPhone').value = customerPhone;
+    $('#bindCode').value = '';
+    $('#bindOverlay').classList.add('open');
+  }
+
+  function closeBind() {
+    $('#bindOverlay').classList.remove('open');
+  }
+
+  function showPay(b) {
+    if (paying) return;
+    view = 'bill';
+    setActiveTab();
+    $('#body').innerHTML = `
+      <div class="qr-box" style="margin-top:6px">
+        <div class="small faint">越南银行 App / 电子钱包 · 扫码还款</div>
+        ${qrSvg(order.id + '-' + b.period)}
+        <div class="mp-amount" style="color:#0F1B2D;font-size:24px;margin-top:10px">${U.currency(b.amount)}</div>
+        <div class="small faint">第 ${b.period} / ${order.bills.length} 期 · ${b.dueDate}</div>
+        <div class="qr-tip">二维码有效期 15:00，请使用越南银行 App 或电子钱包扫码</div>
+      </div>
+      <div class="alert info" style="margin-top:12px"><span>演示</span><span>点击下方按钮模拟第三方支付平台的成功回调，账单会自动销账并同步到管理端。</span></div>
+      <button class="btn success block" id="btnCallback" style="height:46px;font-size:15px;border-radius:11px;margin-top:12px">模拟支付成功并回调</button>
+      <button class="btn ghost block mt12" id="btnCancel">返回账单</button>`;
+    $('#btnCallback').addEventListener('click', async () => {
+      paying = true;
+      const el = $('#btnCallback'); el.textContent = '等待支付平台回调…'; el.disabled = true;
+      await API.payBill(order.id, b.period, { channel: '线上QR', manual: false });
+      order = await API.getOrder(order.id);
+      paying = false;
+      if (view !== 'bill') { U.toast('支付成功，账单已销账'); return; }
+      $('#body').innerHTML = `
+        <div class="mp-success" style="padding-top:40px">
+          <div class="ok-mark">✓</div>
+          <div style="font-size:17px;font-weight:650">还款成功</div>
+          <div class="small faint mt8">第 ${b.period} 期 · ${U.currency(b.amount)}</div>
+          <div class="mono small mt12">${U.esc(order.bills.find(x => x.period === b.period).txnNo || '')}</div>
+          <div class="alert ok mt16" style="text-align:left"><span>回调</span><span>业务系统已收到支付成功通知，账单状态更新为「已还」，管理端账单列表同步刷新。</span></div>
+          <button class="btn primary block mt16" id="btnBack">返回账单列表</button>
+          <a class="btn ghost block mt8" href="admin-bills.html?q=${encodeURIComponent(order.no)}">去管理端查看销账结果</a>
+        </div>`;
+      $('#btnBack').addEventListener('click', () => { targetPeriod = 0; render(); });
+      U.toast('支付成功，账单已销账');
+    });
+    $('#btnCancel').addEventListener('click', render);
+  }
+
+  document.querySelectorAll('#mpTabs [data-view]').forEach(el => el.addEventListener('click', () => {
+    if (el.dataset.view === 'mine') renderMine();
+    else render();
+  }));
+  $('#headBind').addEventListener('click', openBind);
+  $('#bindClose').addEventListener('click', closeBind);
+  $('#bindCancel').addEventListener('click', closeBind);
+  $('#bindOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeBind(); });
+  $('#btnSendCode').addEventListener('click', () => {
+    const phone = $('#bindPhone').value.trim();
+    if (!/^\d{9,15}$/.test(phone)) { U.toast('请输入正确的新手机号', 'err'); return; }
+    U.toast('验证码已发送，原型验证码为 123456');
+  });
+  $('#bindSave').addEventListener('click', async () => {
+    const phone = $('#bindPhone').value.trim();
+    const code = $('#bindCode').value.trim();
+    if (!/^\d{9,15}$/.test(phone)) { U.toast('请输入正确的新手机号', 'err'); return; }
+    if (code !== '123456') { U.toast('短信验证码不正确', 'err'); return; }
+    const btn = $('#bindSave');
+    btn.disabled = true;
+    btn.textContent = '保存中…';
+    customerPhone = phone;
+    localStorage.setItem('bycredit_customer_phone', customerPhone);
+    await loadMyOrders();
+    order = myOrders[0] || null;
+    if (order) orderId = order.id;
+    targetPeriod = 0;
+    btn.disabled = false;
+    btn.textContent = '保存并刷新';
+    closeBind();
+    renderMine();
+    U.toast(myOrders.length ? '换绑成功，订单列表已刷新' : '换绑成功，当前手机号暂无订单');
+  });
+
+  (async function () {
+    const requested = await API.getOrder(orderId);
+    await loadMyOrders();
+    order = myOrders.find(o => o.id === orderId)
+      || (requested && String(requested.customer.phone || '') === customerPhone ? requested : null)
+      || myOrders[0] || null;
+    if (order) orderId = order.id;
+    if (view === 'mine') renderMine();
+    else render();
+  })();
+})();
+</script>
+</body>
+</html>

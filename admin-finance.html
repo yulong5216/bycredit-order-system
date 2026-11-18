@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>财务审核 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">财务审核</div>
+          <div class="page-sub" id="pageSub">待财务审核 · 加载中…</div>
+        </div>
+        <div class="row">
+          <button class="btn" id="refreshBtn">刷新</button>
+          <button class="btn primary" id="bankExport">按银行格式导出</button>
+          <button class="btn primary hide" id="taxExport">导出报税明细</button>
+        </div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card">
+        <div class="tabs" id="tabs"></div>
+        <div class="toolbar">
+          <div class="search"><input id="q" placeholder="订单号 / 客户 / 证件号 / 门店 / IMEI"></div>
+          <select class="select mini" id="store"><option value="">全部门店</option></select>
+          <button class="btn sm" id="searchBtn">查询</button>
+          <button class="btn sm ghost" id="clearBtn">清空</button>
+          <span class="grow-line"></span>
+          <label class="row small muted" style="cursor:pointer"><input class="chk" type="checkbox" id="onlyUrgent"> 只看加急</label>
+        </div>
+        <div class="batchbar" id="batchbar">
+          <span>已选 <b id="selCount">0</b> 单</span>
+          <span>合计放款金额 <b id="selAmount" class="money">0 ₫</b></span>
+          <button class="btn sm" id="batchExport">按银行格式导出</button>
+          <button class="btn sm ghost" id="batchClear">取消勾选</button>
+          <span class="mini-note" id="batchHint"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="financeTable">
+            <thead>
+              <tr id="approvalHead">
+                <th class="chk-col"><input class="chk" type="checkbox" id="checkAll" title="全选本页"></th>
+                <th>订单号</th>
+                <th>客户</th>
+                <th>门店 / 收款人</th>
+                <th>收款账号 / 开户行</th>
+                <th>机型</th>
+                <th class="t-right">放款金额</th>
+                <th>状态</th>
+                <th class="t-right">操作</th>
+              </tr>
+              <tr id="detailHead" class="hide">
+                <th>订单号</th>
+                <th>客户名 / 证件号</th>
+                <th>门店</th>
+                <th>机型 / IMEI</th>
+                <th class="t-right">订单金额</th>
+                <th class="t-right">首付款</th>
+                <th class="t-right">分期额</th>
+                <th class="t-right">放款金额</th>
+                <th class="t-right">已回款</th>
+                <th class="t-right">未回款</th>
+                <th>支付/放款时间</th>
+                <th>银行回单号</th>
+                <th>状态</th>
+                <th class="t-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="total-bar" id="totalBar"></div>
+        <div class="pager" id="pager"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="overlay" id="overlay"></div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  Shell.mount({ nav: 'finance', crumb: '财务 / <b>财务审核</b>' });
+
+  const TABS = [
+    { key: 'review', label: '待审核', test: o => o.status === 'pending_finance' },
+    { key: 'payout', label: '待放款', test: o => o.status === 'pending_payout' },
+    { key: 'paid', label: '已放款 / 还款中', test: o => ['repaying', 'overdue', 'breach', 'closed'].indexOf(o.status) > -1 },
+    { key: 'all', label: '全部', test: () => true },
+    { key: 'detail', label: '财务明细', test: () => true }
+  ];
+  const tabParam = U.qs('tab');
+  const state = {
+    tab: TABS.some(t => t.key === tabParam) ? tabParam : 'review',
+    q: '', store: '', urgent: false, page: 1, size: 10
+  };
+  let all = [];
+  let view = [];
+  let pageRows = [];
+  const selected = new Set();
+  const overlay = document.getElementById('overlay');
+
+  MOCK.STORES.forEach(s => {
+    document.getElementById('store').insertAdjacentHTML('beforeend', `<option value="${s.id}">${U.esc(s.name)}</option>`);
+  });
+
+  const curTab = () => TABS.find(t => t.key === state.tab) || TABS[0];
+  const payoutOf = o => o.plan.price - (o.plan.downPayment || 0);
+  const installmentOf = payoutOf;
+  const paidOf = o => (o.bills || []).reduce((sum, b) => sum + (Number(b.paidAmount) || 0), 0);
+  const unpaidOf = o => Math.max(0, installmentOf(o) - paidOf(o));
+  const sumPrice = arr => arr.reduce((s, o) => s + payoutOf(o), 0);
+
+  function statusPill(o) { return U.pill(o.status); }
+
+  function opsHtml(o) {
+    if (o.status === 'pending_finance') {
+      return `<a class="btn sm primary" href="admin-order-detail.html?id=${o.id}">审核</a>`;
+    }
+    if (o.status === 'pending_payout') {
+      return `<button class="btn sm success" data-payout="${o.id}">标记已放款</button>
+        <a class="btn sm" href="admin-order-detail.html?id=${o.id}">查看</a>`;
+    }
+    return `<a class="btn sm ghost" href="admin-order-detail.html?id=${o.id}">查看</a>`;
+  }
+
+  function rowHtml(o) {
+    const sel = selected.has(o.id);
+    const payee = o.payee || {};
+    return `<tr class="${sel ? 'selected' : ''}" data-id="${o.id}" onclick="location.href='admin-order-detail.html?id=${o.id}'">
+      <td class="chk-col" onclick="event.stopPropagation()">
+        <input class="chk rowchk" type="checkbox" data-id="${o.id}" ${sel ? 'checked' : ''}>
+      </td>
+      <td>
+        <div class="mono strong">${U.esc(o.no)} ${o.urgent ? '<span class="tag urgent">加急</span>' : ''}</div>
+        <div class="sub">${U.esc(o.submittedAt)}</div>
+      </td>
+      <td>
+        <div class="strong">${U.esc(o.customer.name)}</div>
+        <div class="sub">${U.esc(o.customer.phone)}</div>
+      </td>
+      <td>
+        <div>${U.esc(o.plan.storeName)}</div>
+        <div class="sub">${U.esc(payee.name || '未填写')}</div>
+      </td>
+      <td>
+        <div class="mono">${U.esc(payee.account || '—')}</div>
+        <div class="sub">${U.esc(payee.bank || '未填写开户行')}</div>
+      </td>
+      <td>
+        <div>${U.esc(o.device.model)} <span class="faint">${U.esc(o.device.capacity)}</span></div>
+        <div class="sub">${o.plan.periods} 期 × ${U.money(o.plan.perPeriod)}</div>
+      </td>
+      <td class="t-right money strong">${U.currency(payoutOf(o))}</td>
+      <td>${statusPill(o)}</td>
+      <td class="t-right" onclick="event.stopPropagation()">${opsHtml(o)}</td>
+    </tr>`;
+  }
+
+  function detailRowHtml(o) {
+    const payout = o.payout || {};
+    const paid = paidOf(o);
+    return `<tr data-id="${o.id}" onclick="location.href='admin-order-detail.html?id=${o.id}'">
+      <td>
+        <div class="mono strong">${U.esc(o.no)} ${o.urgent ? '<span class="tag urgent">加急</span>' : ''}</div>
+        <div class="sub">${U.esc(o.submittedAt)}</div>
+      </td>
+      <td>
+        <div class="strong">${U.esc(o.customer.name)}</div>
+        <div class="sub mono">${U.esc(o.customer.idNo || '—')}</div>
+      </td>
+      <td>${U.esc(o.plan.storeName)}</td>
+      <td>
+        <div>${U.esc(o.device.model)} <span class="faint">${U.esc(o.device.capacity)}</span></div>
+        <div class="sub mono">${U.esc(o.device.imei || '—')}</div>
+      </td>
+      <td class="t-right money">${U.currency(o.plan.price)}</td>
+      <td class="t-right money">${U.currency(o.plan.downPayment || 0)}</td>
+      <td class="t-right money">${U.currency(installmentOf(o))}</td>
+      <td class="t-right money strong">${U.currency(payoutOf(o))}</td>
+      <td class="t-right money">${U.currency(paid)}</td>
+      <td class="t-right money strong">${U.currency(unpaidOf(o))}</td>
+      <td class="mono small">${U.esc(payout.at || '—')}</td>
+      <td class="mono small">${U.esc(payout.ref || '—')}</td>
+      <td>${statusPill(o)}</td>
+      <td class="t-right" onclick="event.stopPropagation()"><a class="btn sm ghost" href="admin-order-detail.html?id=${o.id}">查看订单</a></td>
+    </tr>`;
+  }
+
+  function renderTabs() {
+    document.getElementById('tabs').innerHTML = TABS.map(t =>
+      `<div class="tab ${state.tab === t.key ? 'active' : ''}" data-tab="${t.key}">${t.label}<span class="cnt">${all.filter(t.test).length}</span></div>`
+    ).join('');
+    document.querySelectorAll('#tabs .tab').forEach(el => el.addEventListener('click', () => {
+      state.tab = el.dataset.tab;
+      state.page = 1;
+      selected.clear();
+      render();
+    }));
+  }
+
+  function renderKpis() {
+    const review = all.filter(o => o.status === 'pending_finance');
+    const payout = all.filter(o => o.status === 'pending_payout');
+    const month = API.today().slice(0, 7);
+    const paidMonth = all.filter(o => o.payout && o.payout.at && o.payout.at.slice(0, 7) === month);
+    const urgent = all.filter(o => o.urgent && (o.status === 'pending_finance' || o.status === 'pending_payout'));
+    const kpis = [
+      { label: '待财务审核', value: review.length, unit: '单', foot: '合计放款金额 ' + U.currency(sumPrice(review)), tone: review.length ? 'warn' : '' },
+      { label: '待放款', value: payout.length, unit: '单', foot: '合计放款金额 ' + U.currency(sumPrice(payout)), tone: '' },
+      { label: '本月已放款金额', value: U.currency(sumPrice(paidMonth)), foot: `本月共 ${paidMonth.length} 单已完成打款`, tone: '' },
+      { label: '加急单据数', value: urgent.length, unit: '单', foot: '待审核 / 待放款中的加急单', tone: urgent.length ? 'down' : '' }
+    ];
+    document.getElementById('kpis').innerHTML = kpis.map(k => `
+      <div class="kpi">
+        <div class="kpi-label">${k.label}</div>
+        <div class="kpi-value">${k.value}${k.unit ? `<small>${k.unit}</small>` : ''}</div>
+        <div class="kpi-foot ${k.tone}">${k.foot}</div>
+      </div>`).join('');
+  }
+
+  function renderTotal() {
+    if (state.tab === 'detail') {
+      const orderSum = view.reduce((sum, o) => sum + (Number(o.plan.price) || 0), 0);
+      const paidSum = view.reduce((sum, o) => sum + paidOf(o), 0);
+      const unpaidSum = view.reduce((sum, o) => sum + unpaidOf(o), 0);
+      document.getElementById('totalBar').innerHTML = `
+        <div>
+          <div class="lbl">当前筛选 · 未回款合计</div>
+          <div class="val">${U.currency(unpaidSum)}</div>
+        </div>
+        <div class="small muted t-right">共 ${view.length} 单 · 订单金额 ${U.currency(orderSum)} · 已回款 ${U.currency(paidSum)}</div>`;
+      return;
+    }
+    const rows = view.filter(o => o.status === 'pending_payout');
+    const map = {};
+    rows.forEach(o => {
+      const bank = (o.payee && o.payee.bank) || '未填写开户行';
+      if (!map[bank]) map[bank] = { n: 0, amt: 0 };
+      map[bank].n++;
+      map[bank].amt += payoutOf(o);
+    });
+    const parts = Object.keys(map)
+      .sort((a, b) => map[b].amt - map[a].amt)
+      .map(b => `${U.esc(b)} ${map[b].n} 单 / 合计 ${U.currency(map[b].amt)}`);
+    document.getElementById('totalBar').innerHTML = `
+      <div>
+        <div class="lbl">当前筛选 · 待放款合计</div>
+        <div class="val">${U.currency(sumPrice(rows))}</div>
+      </div>
+      <div class="small muted t-right">${parts.length ? parts.join(' · ') : '当前筛选结果中没有待放款单据'}</div>`;
+  }
+
+  function syncBatch() {
+    const items = all.filter(o => selected.has(o.id));
+    document.getElementById('selCount').textContent = items.length;
+    document.getElementById('selAmount').textContent = U.currency(sumPrice(items));
+    document.getElementById('batchbar').classList.toggle('show', state.tab !== 'detail' && items.length > 0);
+    const canApprove = items.length > 0 && items.every(o => o.status === 'pending_finance');
+    document.getElementById('batchApprove').disabled = !canApprove;
+    document.getElementById('batchHint').textContent = items.length === 0 ? '' :
+      (canApprove ? '' : '仅「待财务审核」单据可批量审批，其余状态会被忽略');
+  }
+
+  function renderPager(pages) {
+    let btns = `<button class="pg" ${state.page === 1 ? 'disabled' : ''} data-p="${state.page - 1}">上一页</button>`;
+    for (let i = 1; i <= pages; i++) {
+      btns += `<button class="pg ${i === state.page ? 'active' : ''}" data-p="${i}">${i}</button>`;
+    }
+    btns += `<button class="pg" ${state.page === pages ? 'disabled' : ''} data-p="${state.page + 1}">下一页</button>`;
+    document.getElementById('pager').innerHTML =
+      `<span>第 ${state.page} / ${pages} 页 · 共 ${view.length} 条</span><div class="pager-btns">${btns}</div>`;
+    document.querySelectorAll('.pg').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      state.page = Number(b.dataset.p);
+      render();
+    }));
+  }
+
+  function render() {
+    const t = curTab();
+    const isDetail = state.tab === 'detail';
+    const k = state.q.trim().toLowerCase();
+    view = all.filter(o => {
+      if (!t.test(o)) return false;
+      if (state.store && o.plan.storeId !== state.store) return false;
+      if (state.urgent && !o.urgent) return false;
+      if (k) {
+        const hay = [
+          o.no, o.customer.name, o.customer.idNo, o.customer.phone, o.plan.storeName,
+          o.device.model, o.device.imei, o.payee ? o.payee.name : '', o.payout ? o.payout.ref : ''
+        ].join(' ').toLowerCase();
+        if (hay.indexOf(k) === -1) return false;
+      }
+      return true;
+    });
+
+    renderTabs();
+    renderKpis();
+    document.getElementById('approvalHead').classList.toggle('hide', isDetail);
+    document.getElementById('detailHead').classList.toggle('hide', !isDetail);
+    document.getElementById('financeTable').classList.toggle('compact', isDetail);
+    document.getElementById('bankExport').classList.toggle('hide', isDetail);
+    document.getElementById('taxExport').classList.toggle('hide', !isDetail);
+
+    const payoutSum = sumPrice(view.filter(o => o.status === 'pending_payout'));
+    document.getElementById('pageSub').textContent = isDetail
+      ? `${t.label} · 共 ${view.length} 单 · 已回款 ${U.currency(view.reduce((sum, o) => sum + paidOf(o), 0))} · 未回款 ${U.currency(view.reduce((sum, o) => sum + unpaidOf(o), 0))}`
+      : `${t.label} · 共 ${view.length} 单 · 待放款合计 ${U.currency(payoutSum)}`;
+
+    const pages = Math.max(1, Math.ceil(view.length / state.size));
+    if (state.page > pages) state.page = pages;
+    pageRows = view.slice((state.page - 1) * state.size, state.page * state.size);
+
+    if (!pageRows.length) {
+      document.getElementById('tbody').innerHTML =
+        `<tr><td colspan="${isDetail ? 14 : 9}"><div class="empty"><div class="empty-mark">∅</div>没有符合条件的单据，试试切换页签或清空筛选</div></td></tr>`;
+    } else {
+      document.getElementById('tbody').innerHTML = pageRows.map(isDetail ? detailRowHtml : rowHtml).join('');
+    }
+
+    document.querySelectorAll('.rowchk').forEach(el => el.addEventListener('change', () => {
+      if (el.checked) selected.add(el.dataset.id); else selected.delete(el.dataset.id);
+      el.closest('tr').classList.toggle('selected', el.checked);
+      document.getElementById('checkAll').checked =
+        pageRows.length > 0 && pageRows.every(o => selected.has(o.id));
+      syncBatch();
+    }));
+    document.querySelectorAll('[data-payout]').forEach(b =>
+      b.addEventListener('click', () => openPayout(b.dataset.payout)));
+
+    document.getElementById('checkAll').checked =
+      !isDetail && pageRows.length > 0 && pageRows.every(o => selected.has(o.id));
+
+    renderPager(pages);
+    syncBatch();
+    renderTotal();
+  }
+
+  async function load() {
+    document.getElementById('tbody').innerHTML =
+      `<tr><td colspan="${state.tab === 'detail' ? 14 : 9}"><div class="empty">加载中…</div></td></tr>`;
+    const res = await API.listOrders({ status: 'all', size: 999 });
+    all = res.items;
+    render();
+  }
+
+  function closeModal() {
+    overlay.classList.remove('open');
+    overlay.innerHTML = '';
+  }
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+
+  function openModal(opts) {
+    overlay.innerHTML = `<div class="modal">
+      <div class="modal-head">
+        <div class="modal-title">${U.esc(opts.title)}</div>
+        <button class="x" data-close>×</button>
+      </div>
+      <div class="modal-body">${opts.body}</div>
+      <div class="modal-foot">
+        <button class="btn" data-close>取消</button>
+        <button class="btn primary" id="modalOk">${U.esc(opts.ok || '确定')}</button>
+      </div>
+    </div>`;
+    overlay.classList.add('open');
+    overlay.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeModal));
+    overlay.querySelector('#modalOk').addEventListener('click', opts.onOk);
+  }
+
+  function openBankExport(ids) {
+    const rows = all.filter(o => ids.indexOf(o.id) > -1);
+    if (!rows.length) { U.toast('请先勾选要导出的单据', 'err'); return; }
+    const total = rows.reduce((s, o) => s + payoutOf(o), 0);
+    openModal({
+      title: '银行打款清单（预览）',
+      ok: '关闭',
+      body: `<div class="alert info">这是按银行打款模板预览的效果。等你提供银行格式文件（列名、顺序、编码）后，这里直接生成可上传的 Excel / CSV。</div>
+        <div class="table-wrap mt12">
+          <table class="table compact">
+            <thead><tr><th>#</th><th>收款人</th><th>收款账号</th><th>开户行</th><th class="t-right">金额</th><th>机型</th><th>IMEI</th><th>订单号</th></tr></thead>
+            <tbody>${rows.map((o, i) => `<tr style="cursor:default">
+              <td>${i + 1}</td>
+              <td>${U.esc((o.payee && o.payee.name) || o.plan.storeName)}</td>
+              <td class="mono">${U.esc((o.payee && o.payee.account) || '—')}</td>
+              <td>${U.esc((o.payee && o.payee.bank) || '—')}</td>
+              <td class="t-right money">${U.money(payoutOf(o))}</td>
+              <td>${U.esc(o.device.model)} ${U.esc(o.device.capacity)}</td>
+              <td class="mono small">${U.esc(o.device.imei)}</td>
+              <td class="mono small">${U.esc(o.no)}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>
+        <div class="total-bar" style="border-radius:8px;margin-top:12px">
+          <span class="lbl">合计 ${rows.length} 单 · 另有抬头/用途/附言等固定字段按银行模板补齐</span>
+          <span class="val">${U.currency(total)}</span>
+        </div>`,
+      onOk: closeModal
+    });
+  }
+
+  function csvCell(value) {
+    let text = String(value == null ? '' : value);
+    if (/^\s*[=+\-@]/.test(text)) text = "'" + text;
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+
+  function exportTaxDetails() {
+    if (!view.length) { U.toast('当前筛选结果没有可导出的订单', 'err'); return; }
+    const headers = [
+      '订单号', '客户名', '证件号', '手机号', '门店', '机型', '容量', 'IMEI',
+      '订单金额', '首付款', '分期额', '放款金额', '已回款', '未回款',
+      '放款时间', '银行回单号', '订单状态'
+    ];
+    const rows = view.map(o => {
+      const payout = o.payout || {};
+      const status = MOCK.ORDER_STATUS[o.status];
+      return [
+        o.no, o.customer.name, o.customer.idNo, o.customer.phone,
+        o.plan.storeName, o.device.model, o.device.capacity, o.device.imei,
+        Number(o.plan.price) || 0, Number(o.plan.downPayment) || 0,
+        installmentOf(o), payoutOf(o), paidOf(o), unpaidOf(o),
+        payout.at || '', payout.ref || '', status ? status.label : o.status
+      ];
+    });
+    const csv = '\uFEFF' + [headers].concat(rows)
+      .map(row => row.map(csvCell).join(','))
+      .join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `财务报税明细_${API.today()}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    U.toast(`已导出 ${rows.length} 条报税明细`);
+  }
+
+  function openReject(id) {
+    const o = all.find(x => x.id === id);
+    if (!o) return;
+    openModal({
+      title: '退回财务审核',
+      ok: '确认退回',
+      body: `<div class="mini-note mb12">${U.esc(o.no)} · ${U.esc(o.customer.name)} · ${U.currency(payoutOf(o))}</div>
+        <div class="field">
+          <div class="label">退回原因<span class="req">*</span></div>
+          <textarea class="textarea" id="rejectNote" placeholder="例如：收款账号与门店名称不一致，请补充回收协议"></textarea>
+        </div>`,
+      onOk: async () => {
+        const note = overlay.querySelector('#rejectNote').value.trim();
+        if (!note) { U.toast('请填写退回原因', 'err'); return; }
+        closeModal();
+        await API.financeReject(id, note);
+        selected.delete(id);
+        U.toast('已退回，单据回到待送财务');
+        load();
+      }
+    });
+  }
+
+  function openPayout(id) {
+    const o = all.find(x => x.id === id);
+    if (!o) return;
+    openModal({
+      title: '标记已放款',
+      ok: '确认已放款',
+      body: `<div class="mini-note mb12">${U.esc(o.no)} · ${U.esc(o.customer.name)} · ${U.esc(o.plan.storeName)}</div>
+        <div class="kv two mb12">
+          <div class="kv-k">收款人</div><div class="kv-v">${U.esc((o.payee && o.payee.name) || '未填写')}</div>
+          <div class="kv-k">放款金额</div><div class="kv-v money">${U.currency(payoutOf(o))}</div>
+          <div class="kv-k">收款账号</div><div class="kv-v mono">${U.esc((o.payee && o.payee.account) || '—')}</div>
+          <div class="kv-k">开户行</div><div class="kv-v">${U.esc((o.payee && o.payee.bank) || '未填写')}</div>
+        </div>
+        <div class="field">
+          <div class="label">银行回单号<span class="req">*</span></div>
+          <input class="input" id="payRef" placeholder="如 VCB-20261115-0101">
+          <div class="hint">打款在银行软件内完成，本系统只做汇总与状态回写。银行打款回执回调接口已预留，接入后无需手工填写；当前先手工回填回单号。</div>
+        </div>`,
+      onOk: async () => {
+        const ref = overlay.querySelector('#payRef').value.trim();
+        if (!ref) { U.toast('请填写银行回单号', 'err'); return; }
+        closeModal();
+        await API.markPayout(id, ref);
+        selected.delete(id);
+        U.toast('已标记放款，订单进入还款中');
+        load();
+      }
+    });
+  }
+
+  document.getElementById('searchBtn').addEventListener('click', () => {
+    state.q = document.getElementById('q').value;
+    state.store = document.getElementById('store').value;
+    state.urgent = document.getElementById('onlyUrgent').checked;
+    state.page = 1;
+    render();
+  });
+  document.getElementById('q').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('searchBtn').click();
+  });
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    document.getElementById('q').value = '';
+    document.getElementById('store').value = '';
+    document.getElementById('onlyUrgent').checked = false;
+    Object.assign(state, { q: '', store: '', urgent: false, page: 1 });
+    render();
+  });
+  document.getElementById('checkAll').addEventListener('change', e => {
+    pageRows.forEach(o => {
+      if (e.target.checked) selected.add(o.id); else selected.delete(o.id);
+    });
+    render();
+  });
+  document.getElementById('batchExport').addEventListener('click', () => {
+    const ids = selected.size
+      ? all.filter(o => selected.has(o.id)).map(o => o.id)
+      : all.filter(o => o.status === 'pending_payout').map(o => o.id);
+    openBankExport(ids);
+  });
+  document.getElementById('bankExport').addEventListener('click', () => {
+    const ids = selected.size
+      ? all.filter(o => selected.has(o.id)).map(o => o.id)
+      : all.filter(o => o.status === 'pending_payout').map(o => o.id);
+    openBankExport(ids);
+  });
+  document.getElementById('taxExport').addEventListener('click', exportTaxDetails);
+  document.getElementById('batchClear').addEventListener('click', () => {
+    selected.clear();
+    render();
+  });
+  document.getElementById('refreshBtn').addEventListener('click', () => load());
+
+  load();
+})();
+</script>
+</body>
+</html>

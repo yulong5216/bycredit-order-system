@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订单池 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title" id="pageTitle">订单池</div>
+          <div class="page-sub" id="pageSub">全部订单 · 共 0 单</div>
+        </div>
+        <div class="row">
+          <button class="btn" onclick="U.toast('原型阶段暂未接入导出')">导出</button>
+          <a class="btn primary" href="sales-new-order.html">＋ 新建录单</a>
+        </div>
+      </div>
+
+      <div class="kpis five" id="kpis"></div>
+
+      <div class="card">
+        <div class="tabs" id="tabs"></div>
+        <div class="toolbar">
+          <div class="search"><input id="q" placeholder="订单号 / 姓名 / 电话 / IMEI / MDM"></div>
+          <select class="select mini" id="store"><option value="">全部门店</option></select>
+          <select class="select mini" id="sales"><option value="">全部业务员</option></select>
+          <input class="input mini" type="date" id="from" title="提交开始日期">
+          <span class="faint small">至</span>
+          <input class="input mini" type="date" id="to" title="提交结束日期">
+          <button class="btn sm" id="searchBtn">查询</button>
+          <button class="btn sm ghost" id="clearBtn">清空</button>
+          <span class="grow-line"></span>
+          <label class="row small muted" style="cursor:pointer"><input class="chk" type="checkbox" id="onlyUrgent"> 只看加急</label>
+        </div>
+        <div class="batchbar" id="batchbar">
+          <span>已选 <b id="selCount">0</b> 单</span>
+          <button class="btn sm primary" id="batchFinance">批量发送财务</button>
+          <button class="btn sm" id="batchUrgent">标记加急</button>
+          <button class="btn sm ghost" id="batchClear">取消勾选</button>
+          <span class="mini-note" id="batchHint"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="chk-col"><input class="chk" type="checkbox" id="checkAll" title="全选本页"></th>
+                <th>订单号 / 提交时间</th>
+                <th>客户</th>
+                <th>机型 / MDM</th>
+                <th>门店 / 业务员</th>
+                <th class="t-right">分期方案</th>
+                <th>状态</th>
+                <th class="t-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="pager"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  const stage = U.qs('stage');
+  const state = { page: 1, size: 10, stage: stage || '', status: 'all', q: U.qs('q') || '', store: U.qs('store') || '', sales: '', from: '', to: '', urgent: false };
+  const TABS = [
+    { key: 'all', label: '全部' },
+    { key: 'first', label: '待初审' },
+    { key: 'sign', label: '待客户签约' },
+    { key: 'final', label: '待终审' },
+    { key: 'toFinance', label: '待送财务' },
+    { key: 'finance', label: '待财务' },
+    { key: 'payout', label: '待放款' },
+    { key: 'repaying', label: '还款中' },
+    { key: 'rejected', label: '已驳回' }
+  ];
+  const titleMap = { first: '初审待办', sign: '待客户签约', final: '终审待办', finance: '财务审核', payout: '待放款' };
+  const navMap = { first: 'first', sign: 'sign', final: 'final', finance: 'finance', payout: 'payout' };
+  const navKey = stage ? (navMap[stage] || 'orders') : 'orders';
+  Shell.mount({ nav: navKey, crumb: '业务办理 / <b>' + (titleMap[navKey] || '订单池') + '</b>' });
+
+  if (stage) {
+    const t = titleMap[navKey];
+    document.getElementById('pageTitle').textContent = t;
+    document.title = t + ' · BY Credit';
+  }
+
+  MOCK.STORES.forEach(s => {
+    document.getElementById('store').insertAdjacentHTML('beforeend', `<option value="${s.id}">${U.esc(s.name)}</option>`);
+  });
+  MOCK.SALES.forEach(s => {
+    document.getElementById('sales').insertAdjacentHTML('beforeend', `<option value="${s.id}">${U.esc(s.name)}</option>`);
+  });
+  document.getElementById('q').value = state.q;
+  if (state.store) document.getElementById('store').value = state.store;
+
+  const selected = new Set();
+  let pageItems = [];
+
+  function renderTabs(c) {
+    const visible = stage ? [] : TABS;
+    document.getElementById('tabs').style.display = stage ? 'none' : 'flex';
+    document.getElementById('tabs').innerHTML = visible.map(t =>
+      `<div class="tab ${state.status === t.key ? 'active' : ''}" data-status="${t.key}">${t.label}<span class="cnt">${c[t.key] || 0}</span></div>`
+    ).join('');
+    document.querySelectorAll('.tab').forEach(el => el.addEventListener('click', () => {
+      state.status = el.dataset.status; state.page = 1; selected.clear(); load();
+    }));
+  }
+
+  function renderKpis(c) {
+    const kpis = [
+      { label: '待初审', value: c.first, foot: '核对资料 · 发起签约 · 绑定 MDM', tone: c.first ? 'warn' : '' },
+      { label: '待客户签约', value: c.sign, foot: '已登记上传，等待客户在 MobiFone 签署', tone: '' },
+      { label: '待终审', value: c.final, foot: '只核对资料 / 放款 / MDM 信息', tone: '' },
+      { label: '待送财务', value: c.finance, foot: '终审通过后批量送审', tone: '' },
+      { label: '待放款', value: c.payout, foot: '财务通过，等银行打款', tone: '' }
+    ];
+    document.getElementById('kpis').innerHTML = kpis.map(k => `
+      <div class="kpi">
+        <div class="kpi-label">${k.label}</div>
+        <div class="kpi-value">${k.value}<small>单</small></div>
+        <div class="kpi-foot ${k.tone}">${k.foot}</div>
+      </div>`).join('');
+  }
+
+  function actionFor(o) {
+    const href = `admin-order-detail.html?id=${o.id}`;
+    if (o.status === 'pending_first') return `<a class="btn sm primary" href="${href}">初审</a>`;
+    if (o.status === 'pending_customer_sign') return `<a class="btn sm" href="${href}">签约跟进</a>`;
+    if (o.status === 'pending_final') return `<a class="btn sm primary" href="${href}">终审</a>`;
+    if (o.status === 'approved_final') return `<button class="btn sm primary" data-fin="${o.id}">发送财务</button>`;
+    if (o.status === 'pending_finance') return `<a class="btn sm primary" href="admin-finance.html">财务审核</a>`;
+    if (o.status === 'pending_payout') return `<a class="btn sm" href="admin-finance.html?tab=payout">去放款</a>`;
+    return `<a class="btn sm ghost" href="${href}">查看</a>`;
+  }
+
+  function row(o) {
+    const sel = selected.has(o.id);
+    return `<tr class="${sel ? 'selected' : ''}" data-id="${o.id}" onclick="location.href='admin-order-detail.html?id=${o.id}'">
+      <td class="chk-col" onclick="event.stopPropagation()">
+        <input class="chk rowchk" type="checkbox" data-id="${o.id}" ${sel ? 'checked' : ''}>
+      </td>
+      <td>
+        <div class="mono strong">${U.esc(o.no)} ${o.urgent ? '<span class="tag urgent">加急</span>' : ''}</div>
+        <div class="sub">${U.esc(o.submittedAt)} · ${U.esc(o.source)}</div>
+      </td>
+      <td>
+        <div class="strong">${U.esc(o.customer.name)}</div>
+        <div class="sub">${U.esc(o.customer.phone)} · ${U.esc(o.customer.idNo).slice(0, 6)}****</div>
+      </td>
+      <td>
+        <div>${U.esc(o.device.model)} <span class="faint">${U.esc(o.device.capacity)}</span></div>
+        <div class="sub mono">${o.mdm.bound ? U.esc(o.mdm.serial) : 'MDM 未绑定'}</div>
+      </td>
+      <td>
+        <div>${U.esc(o.plan.storeName)}</div>
+        <div class="sub">${U.esc(o.plan.salesName)}</div>
+      </td>
+      <td class="t-right">
+        <div class="money strong">${U.currency(o.plan.price)}</div>
+        <div class="sub money">${o.plan.periods} 期 × ${U.money(o.plan.perPeriod)}</div>
+      </td>
+      <td>${U.pill(o.status)}${o.status === 'pending_finance' && o.finance.status === '已退回' ? '<div class="sub" style="color:#B42318">财务已退回</div>' : ''}</td>
+      <td class="t-right" onclick="event.stopPropagation()">${actionFor(o)}</td>
+    </tr>`;
+  }
+
+  function syncBatch() {
+    document.getElementById('selCount').textContent = selected.size;
+    document.getElementById('batchbar').classList.toggle('show', selected.size > 0);
+    const rowSel = pageItems.filter(o => selected.has(o.id));
+    const notFinal = rowSel.filter(o => o.status !== 'approved_final').length;
+    const toFinance = rowSel.filter(o => o.status === 'approved_final').length;
+    document.getElementById('batchHint').textContent =
+      selected.size === 0 ? '' : (toFinance ? `其中 ${toFinance} 单终审通过可直接送财务` : '所选订单中没有「终审通过」的单据') +
+      (notFinal ? `，${notFinal} 单会被跳过` : '');
+    document.getElementById('batchFinance').disabled = toFinance === 0;
+  }
+
+  async function load() {
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="8"><div class="empty">加载中…</div></td></tr>`;
+    const res = await API.listOrders(state);
+    pageItems = res.items;
+    renderTabs(res.counts);
+    renderKpis(res.counts);
+    document.getElementById('pageSub').textContent = `${stage ? titleMap[navKey] : '全部订单'} · 共 ${res.total} 单`;
+    if (!pageItems.length) {
+      document.getElementById('tbody').innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-mark">∅</div>没有符合条件的订单，试试清空筛选条件</div></td></tr>`;
+    } else {
+      document.getElementById('tbody').innerHTML = pageItems.map(row).join('');
+    }
+    document.querySelectorAll('.rowchk').forEach(el => el.addEventListener('change', () => {
+      if (el.checked) selected.add(el.dataset.id); else selected.delete(el.dataset.id);
+      el.closest('tr').classList.toggle('selected', el.checked);
+      syncBatch();
+    }));
+    document.querySelectorAll('[data-fin]').forEach(el => el.addEventListener('click', async () => {
+      await API.sendToFinance([el.dataset.fin]);
+      U.toast('已发送财务审核');
+      load();
+    }));
+    document.getElementById('checkAll').checked = pageItems.length > 0 && pageItems.every(o => selected.has(o.id));
+
+    const pages = Math.max(1, Math.ceil(res.total / state.size));
+    let btns = `<button class="pg" ${state.page === 1 ? 'disabled' : ''} data-p="${state.page - 1}">上一页</button>`;
+    for (let i = 1; i <= pages; i++) btns += `<button class="pg ${i === state.page ? 'active' : ''}" data-p="${i}">${i}</button>`;
+    btns += `<button class="pg" ${state.page === pages ? 'disabled' : ''} data-p="${state.page + 1}">下一页</button>`;
+    document.getElementById('pager').innerHTML = `<span>第 ${state.page} / ${pages} 页 · 每页 ${state.size} 条</span><div class="pager-btns">${btns}</div>`;
+    document.querySelectorAll('.pg').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return; state.page = Number(b.dataset.p); load();
+    }));
+    syncBatch();
+  }
+
+  document.getElementById('searchBtn').addEventListener('click', () => {
+    state.q = document.getElementById('q').value;
+    state.store = document.getElementById('store').value;
+    state.sales = document.getElementById('sales').value;
+    state.from = document.getElementById('from').value;
+    state.to = document.getElementById('to').value;
+    state.urgent = document.getElementById('onlyUrgent').checked;
+    state.page = 1; load();
+  });
+  document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('searchBtn').click(); });
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    ['q', 'store', 'sales', 'from', 'to'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('onlyUrgent').checked = false;
+    Object.assign(state, { q: '', store: '', sales: '', from: '', to: '', urgent: false, page: 1 });
+    load();
+  });
+  document.getElementById('checkAll').addEventListener('change', e => {
+    pageItems.forEach(o => { if (e.target.checked) selected.add(o.id); else selected.delete(o.id); });
+    load();
+  });
+  document.getElementById('batchClear').addEventListener('click', () => { selected.clear(); load(); });
+  document.getElementById('batchFinance').addEventListener('click', async () => {
+    const ids = pageItems.filter(o => selected.has(o.id) && o.status === 'approved_final').map(o => o.id);
+    const n = await API.sendToFinance(ids);
+    U.toast(`已批量发送 ${n} 单至财务审核`);
+    selected.clear();
+    load();
+  });
+  document.getElementById('batchUrgent').addEventListener('click', async () => {
+    await API.markUrgent(Array.from(selected), true);
+    U.toast('已标记加急');
+    load();
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

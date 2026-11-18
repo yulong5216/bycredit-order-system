@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订单详情 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="back" id="back">← 返回订单池</div>
+
+      <div class="card mb16" id="hero"><div class="empty">加载中…</div></div>
+
+      <div class="detail-grid">
+        <div class="stack">
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">流程进度 <span class="card-sub">初审 → 客户签约 → 终审 → 财务 → 放款</span></div>
+              <span class="tag" id="flowTag"></span>
+            </div>
+            <div class="card-body" id="flow"></div>
+          </div>
+
+          <div class="card">
+            <div class="tabs" id="tabs"></div>
+            <div class="card-body" id="tabBody"></div>
+          </div>
+        </div>
+
+        <div class="stack sticky" id="side"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay"></div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  const id = U.qs('id') || 'o1';
+  const role = Shell.role();
+  const canFirst = role === 'admin' || role === 'first';
+  const canFinal = role === 'admin' || role === 'final';
+  const canFin = role === 'admin' || role === 'finance';
+  let o = null;
+  let customerHistory = [];
+  let tab = U.qs('tab') || 'profile';
+
+  const TABS = [
+    { key: 'profile', label: '客户资料' },
+    { key: 'docs', label: '影像资料' },
+    { key: 'esign', label: '电子签约' },
+    { key: 'plan', label: '分期方案' },
+    { key: 'device', label: '设备信息' },
+    { key: 'money', label: 'MDM 与放款' },
+    { key: 'log', label: '操作日志' }
+  ];
+
+  const FIRST_CHECKS = [
+    ['身份证正反面清晰且在有效期内', '系统识别与证件一致'],
+    ['证件姓名 / 号码与录单一致', '重点核对相似字与越文拼写'],
+    ['工作证明与填表单位一致', '单位名称、地址、电话'],
+    ['银行流水 3 个月可读', '有稳定进账，无异常大额'],
+    ['员工与客户合影已上传', '确认本人到场办理'],
+    ['手机号实名且满 6 个月', '与客户证件姓名一致'],
+    ['手机串码实拍与 IMEI 一致', '开机界面 *＃06＃ 截图'],
+    ['常用住址照片可辨识', '至少 2 张，含门牌']
+  ];
+  const FINAL_CHECKS = [
+    ['客户资料与影像资料一一对应', ''],
+    ['分期方案 / 首付 / 期数正确', ''],
+    ['MDM 序列号已绑定且可查', ''],
+    ['门店收款信息与合同一致', ''],
+    ['放款金额与门店已确认', '']
+  ];
+
+  async function load() {
+    o = await API.getOrder(id);
+    if (!o) { document.getElementById('hero').innerHTML = '<div class="empty">订单不存在</div>'; return; }
+    customerHistory = (await API.getCustomerHistory(id)) || [];
+    document.title = o.no + ' · BY Credit';
+    Shell.mount({ nav: navFrom(o), crumb: `业务办理 / <b>订单详情</b> / ${U.esc(o.no)}` });
+    renderHero(); renderFlow(); renderTabs(); renderBody(); renderSide();
+  }
+  function navFrom(x) {
+    return { pending_first: 'first', rejected_first: 'first', pending_customer_sign: 'sign',
+      pending_final: 'final', rejected_final: 'final', pending_finance: 'finance',
+      approved_final: 'finance', pending_payout: 'payout' }[x.status] || 'orders';
+  }
+
+  document.getElementById('back').addEventListener('click', () => {
+    if (history.length > 1) history.back(); else location.href = 'admin-orders.html';
+  });
+
+  /* ================= 概览 ================= */
+  function renderHero() {
+    const amt = o.plan.price - (o.plan.downPayment || 0);
+    const bad = customerHistory.some(h => h.risk === 'bad');
+    const histBanner = customerHistory.length ? `<div class="alert ${bad ? 'danger' : 'ok'} mt12">
+      <span>存在历史订单</span>
+      <span>该客户在本系统有 ${customerHistory.length} 笔历史订单：${customerHistory.map(h => `${U.esc(h.no)}（${U.esc(h.label)}）`).join('、')}</span>
+    </div>` : '';
+    document.getElementById('hero').innerHTML = `
+      <div class="hero">
+        <div>
+          <div class="hero-title">
+            <span class="mono">${U.esc(o.no)}</span>
+            ${U.pill(o.status)}
+            ${o.urgent ? '<span class="tag urgent">加急</span>' : ''}
+          </div>
+          <div class="hero-meta">
+            <span>客户：<b>${U.esc(o.customer.name)}</b> · ${U.esc(o.customer.phone)}</span>
+            <span>门店：${U.esc(o.plan.storeName)}</span>
+            <span>业务员：${U.esc(o.plan.salesName)}</span>
+            <span>提交：${U.esc(o.submittedAt)}</span>
+          </div>
+        </div>
+        <div class="row">
+          <div style="text-align:right">
+            <div class="mini-note">放款给门店</div>
+            <div class="money-strong" style="font-size:18px">${U.currency(amt)}</div>
+            <div class="mini-note">${o.plan.periods} 期 × ${U.currency(o.plan.perPeriod)}</div>
+          </div>
+        </div>
+      </div>${histBanner}`;
+  }
+
+  function renderFlow() {
+    const s = o.status;
+    const doneAll = ['repaying', 'overdue', 'breach', 'closed'].indexOf(s) > -1;
+    const steps = [
+      { t: '录单提交', d: o.submittedAt, on: true },
+      { t: '初审', d: firstSub(), on: s !== 'draft' },
+      { t: '客户签约', d: esignSub(), on: o.esign.status === '已签署' },
+      { t: '终审', d: o.review.final ? `${o.review.final.by} · ${o.review.final.at}` : (s === 'pending_final' ? '等待终审核对' : ''), on: !!o.review.final && o.review.final.result === 'pass' },
+      { t: '财务审核', d: o.finance.at ? `${o.finance.by} · ${o.finance.at}` : (s === 'pending_finance' ? '等待财务审批' : ''), on: o.finance.status === '已通过' || doneAll },
+      { t: '放款', d: o.payout.at ? `${o.payout.at} · ${o.payout.ref}` : (s === 'pending_payout' ? '等待银行打款' : ''), on: o.payout.status === '已放款' }
+    ];
+    let nowIdx = 0;
+    steps.forEach((st, i) => { if (st.on) nowIdx = i + 1; });
+    const blocked = s === 'rejected_first' || s === 'rejected_final';
+    document.getElementById('flowTag').textContent = blocked ? '已驳回' : (doneAll ? '已放款' : '进行中');
+    document.getElementById('flow').innerHTML = `<div class="timeline">${steps.map((st, i) => {
+      const cls = st.on ? 'done' : (i === nowIdx && !blocked ? 'now' : '');
+      return `<div class="tl-item ${cls}">
+        <div class="tl-title">${st.t}</div>
+        <div class="tl-sub">${U.esc(st.d || '待处理')}</div>
+      </div>`;
+    }).join('')}</div>`;
+  }
+  function firstSub() {
+    if (o.review.first) return `${o.review.first.by} · ${o.review.first.at} · ${o.review.first.result === 'pass' ? '通过' : '驳回'}`;
+    return o.status === 'pending_first' ? '核对资料 / 发起签约 / 绑定 MDM' : '';
+  }
+  function esignSub() {
+    if (o.esign.status === '已签署') return `已签署 · ${o.esign.signedAt}`;
+    if (o.esign.status === '签署失败') return '签署失败：' + o.esign.failReason;
+    if (o.esign.status === '待客户签约') return '已登记上传 MobiFone，等待客户签署';
+    return '未发起';
+  }
+
+  /* ================= Tabs ================= */
+  function renderTabs() {
+    document.getElementById('tabs').innerHTML = TABS.map(t =>
+      `<div class="tab ${tab === t.key ? 'active' : ''}" data-tab="${t.key}">${t.label}</div>`).join('');
+    document.querySelectorAll('[data-tab]').forEach(el => el.addEventListener('click', () => {
+      tab = el.dataset.tab; renderTabs(); renderBody();
+    }));
+  }
+
+  function kv(k, v) { return `<div class="kv-k">${k}</div><div class="kv-v">${v}</div>`; }
+
+  function renderBody() {
+    const el = document.getElementById('tabBody');
+    el.innerHTML = ({
+      profile: profileTab, docs: docsTab, esign: esignTab,
+      plan: planTab, device: deviceTab, money: moneyTab, log: logTab
+    })[tab]();
+    bindDocClicks();
+  }
+
+  function profileTab() {
+    const c = o.customer;
+    const editable = canFirst && ['pending_first', 'pending_final'].indexOf(o.status) > -1;
+    return `
+      <div class="row-between mb12">
+        <div class="section-title" style="margin:0">客户基本信息</div>
+        ${editable ? '<button class="btn sm" data-act="edit-profile">二次编辑</button>' : ''}
+      </div>
+      <div class="kv two">
+        ${kv('姓名', U.esc(c.name))}${kv('证件号码', `<span class="mono">${U.esc(c.idNo)}</span>`)}
+        ${kv('手机号', U.esc(c.phone))}${kv('证件有效期', '至 2036-05-12')}
+        ${kv('常居住址', U.esc(c.address))}${kv('居住时长', '3 年 2 个月')}
+        ${kv('紧急联系人', U.esc(c.emergencyName) + ' · ' + U.esc(c.emergencyRelation))}
+        ${kv('紧急联系电话', U.esc(c.emergencyPhone || '—'))}
+        ${kv('门店', U.esc(o.plan.storeName))}${kv('业务员', U.esc(o.plan.salesName))}
+        ${kv('录入来源', U.esc(o.source))}${kv('设备锁定', U.esc(o.deviceLock))}
+      </div>
+      ${o.edits && o.edits.length ? `<div class="side-block"><div class="side-title">二次编辑记录</div>
+        ${o.edits.map(e => `<div class="mini-note">${U.esc(e.at)} · ${U.esc(e.by)} 修改了 ${U.esc(e.fields)}</div>`).join('')}</div>` : ''}
+      ${o.rejectReason ? `<div class="alert danger mt12">驳回原因：${U.esc(o.rejectReason)}</div>` : ''}`;
+  }
+
+  function docsTab() {
+    const required = MOCK.DOC_TYPES.filter(t => t.required);
+    const have = required.filter(t => o.docs[t.key]).length;
+    return `
+      <div class="row-between mb12">
+        <div class="section-title" style="margin:0">影像资料 <span class="card-sub">已上传 ${have} / ${required.length} 项必传</span></div>
+        ${have === required.length ? '<span class="tag ok">必传齐全</span>' : '<span class="tag urgent">存在缺失</span>'}
+      </div>
+      <div class="doc-grid">
+        ${MOCK.DOC_TYPES.map(t => {
+          const d = o.docs[t.key];
+          return `<div class="doc-card ${d ? '' : 'missing'}" data-doc="${t.key}">
+            <div class="doc-thumb">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#7E8FA9" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>
+              ${t.multiple ? '<span class="doc-tag">多张</span>' : ''}
+              ${!t.required ? '<span class="doc-tag">选传</span>' : ''}
+            </div>
+            <div class="doc-meta">
+              <div class="doc-name">${t.label}</div>
+              <div class="doc-sub">${d ? U.esc(d.name) : '未上传 · 点击模拟上传'}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="alert info mt12">资料类型可配置；新增类型只需在资料字典里加一项，录单页与审核页自动同步。</div>`;
+  }
+  function bindDocClicks() {
+    document.querySelectorAll('[data-doc]').forEach(el => el.addEventListener('click', async () => {
+      const key = el.dataset.doc;
+      if (o.docs[key]) { U.toast('原型阶段仅展示缩略图'); return; }
+      await API.updateOrderDoc(o.id, key, { name: 'upload_' + key + '_' + Date.now().toString().slice(-5) + '.jpg', at: API.now() });
+      await load(); U.toast('已模拟上传');
+    }));
+  }
+
+  function esignTab() {
+    const e = o.esign;
+    const tone = e.status === '已签署' ? 'ok' : e.status === '签署失败' ? 'no' : '';
+    const chips = `
+      <div class="req-chips">
+        <span class="req-chip ${e.status === '已签署' ? 'ok' : ''}">电子签约 ${e.status === '已签署' ? '已完成' : e.status}</span>
+        <span class="req-chip ${o.mdm.bound ? 'ok' : 'no'}">MDM ${o.mdm.bound ? '已绑定' : '未绑定'}</span>
+        <span class="req-chip ${o.payee && o.payee.account ? 'ok' : 'no'}">门店收款信息 ${o.payee && o.payee.account ? '已填写' : '缺失'}</span>
+      </div>`;
+    const canOperate = canFirst && ['pending_first', 'rejected_first'].indexOf(o.status) > -1;
+    let actions = '';
+    if (canOperate && (e.status === '未发起' || e.status === '签署失败')) {
+      actions = `<button class="btn" data-act="download-esign">下载客户资料表格</button>
+        <button class="btn primary" data-act="start-esign">${e.status === '签署失败' ? '重新登记上传' : '登记已上传 MobiFone'}</button>`;
+    }
+    if (o.status === 'pending_customer_sign' && canFirst) {
+      actions = `<button class="btn primary" data-act="sign-ok">回填签署成功</button>
+                 <button class="btn danger" data-act="sign-fail">回填签署失败</button>`;
+    }
+    const failBox = e.status === '签署失败'
+      ? `<div class="alert warn mt12">上次签署失败：${U.esc(e.failReason)}。核对资料后可重新下载表格、上传 MobiFone 并登记新的上传记录（当前为第 ${e.attempt} 次）。</div>` : '';
+
+    return `
+      <div class="row-between mb12">
+        <div class="section-title" style="margin:0">电子签约（人工 MobiFone 流程）</div>
+        <span class="tag ${tone}">${U.esc(e.status)}</span>
+      </div>
+      ${chips}
+      ${failBox}
+      <div class="timeline mt16">
+        <div class="tl-item ${e.attempt ? 'done' : 'now'}">
+          <div class="tl-title">1. 下载客户资料表格</div>
+          <div class="tl-sub">${e.attempt ? '第 ' + e.attempt + ' 次签约已使用客户资料表格' : '导出客户姓名 / 证件号 / 手机号 / 订单金额等字段，用于上传 MobiFone'}</div>
+        </div>
+        <div class="tl-item ${e.uploadedAt ? 'done' : (e.attempt ? 'now' : '')}">
+          <div class="tl-title">2. 人工上传 MobiFone 并登记</div>
+          <div class="tl-sub">${e.uploadedAt ? U.esc(e.uploadedAt) + ' · 表格 ' + U.esc(e.fileName || '—') + '（第 ' + e.attempt + ' 次）' : '在 MobiFone 后台完成客户 KYC 与签署，回到本页登记上传的表格文件名'}</div>
+        </div>
+        <div class="tl-item ${e.signedAt || e.status === '签署失败' ? 'done' : (e.uploadedAt ? 'now' : '')}">
+          <div class="tl-title">3. 客户完成 KYC 与签署</div>
+          <div class="tl-sub">${e.signedAt ? U.esc(e.signedAt) : (e.status === '签署失败' ? '客户签署失败：' + U.esc(e.failReason) : '在 MobiFone 后台查看客户签署进度，签署完成后回填结果')}</div>
+        </div>
+        <div class="tl-item ${e.signedAt ? 'done' : ''}">
+          <div class="tl-title">4. 回填合同号与结果并归档</div>
+          <div class="tl-sub">${e.signedAt ? '已回填合同号 ' + U.esc(e.contractNo) + '，合同信息已归档到订单' : 'MobiFone 不提供签约回调，合同号与签署结果需人工回填'}</div>
+        </div>
+      </div>
+      ${actions ? `<div class="row mt16">${actions}</div>` : ''}
+      ${actions ? '<div class="mini-note mt8">系统不自动创建合同、不发送短信。表格下载后在 MobiFone 后台完成签约，再回本页登记文件与回填合同号。</div>' : ''}
+      <div class="side-block">
+        <div class="side-title">签约操作记录</div>
+        <table class="table compact">
+          <thead><tr><th>次数</th><th>合同号</th><th>动作</th><th>操作人</th><th>时间</th></tr></thead>
+          <tbody>${(o.esignLog || []).map(l => `<tr style="cursor:default">
+            <td>#${l.attempt}</td><td class="mono">${U.esc(l.contractNo || '—')}</td><td>${U.esc(l.action)}</td><td>${U.esc(l.by || '—')}</td><td class="muted">${U.esc(l.at)}</td>
+          </tr>`).join('') || '<tr><td colspan="5" class="muted">暂无签约记录</td></tr>'}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function planTab() {
+    const p = o.plan;
+    const editable = canFirst && ['pending_first', 'pending_final'].indexOf(o.status) > -1;
+    return `
+      <div class="row-between mb12">
+        <div class="section-title" style="margin:0">分期方案</div>
+        ${editable ? '<button class="btn sm" data-act="edit-plan">调整方案</button>' : ''}
+      </div>
+      <div class="kv two">
+        ${kv('手机总价', U.currency(p.price))}${kv('首付（客户付门店）', U.currency(p.downPayment || 0))}
+        ${kv('分期期数', p.periods + ' 期')}${kv('每期金额', U.currency(p.perPeriod))}
+        ${kv('首期还款日', U.esc(p.firstDueDate))}${kv('每月还款日', '每月 ' + U.esc(p.dueDay) + ' 日')}
+        ${kv('放款给门店', `<b>${U.currency(p.price - (p.downPayment || 0))}</b>`)}${kv('合同总额', U.currency(o.bills.reduce((s, b) => s + b.amount, 0)))}
+      </div>
+      <div class="side-block">
+        <div class="side-title">还款计划（生成于放款后）</div>
+        <table class="table compact">
+          <thead><tr><th>期次</th><th>应还日</th><th class="t-right">金额</th><th>状态</th><th>实还时间</th></tr></thead>
+          <tbody>${o.bills.map(b => `<tr style="cursor:default">
+            <td>第 ${b.period} / ${b.periods} 期</td><td class="mono">${b.dueDate}</td>
+            <td class="t-right money">${U.money(b.amount)}</td><td>${U.billPill(b.status)}</td>
+            <td class="muted">${U.esc(b.paidAt || '—')}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function deviceTab() {
+    const d = o.device;
+    return `
+      <div class="section-title">设备与验机</div>
+      <div class="kv two">
+        ${kv('机型', U.esc(d.model))}${kv('容量 / 颜色', U.esc(d.capacity) + ' · ' + U.esc(d.color))}
+        ${kv('IMEI', `<span class="mono">${U.esc(d.imei)}</span>`)}${kv('验机评分', U.esc(d.score))}
+        ${kv('供货方式', '合作门店现货')}${kv('库存归属', '门店所有（我方不放库存）')}
+      </div>
+      <div class="alert info mt12">业务模式：客户向门店支付首付，我方与门店签回收协议后放款给门店，设备由门店直接交付客户，因此流程中没有「出库 / 核验出库」环节。</div>`;
+  }
+
+  function moneyTab() {
+    const p = o.payee || {};
+    const editable = canFirst && ['pending_first', 'pending_final', 'approved_final'].indexOf(o.status) > -1;
+    return `
+      <div class="row-between mb12">
+        <div class="section-title" style="margin:0">监管锁（MDM）</div>
+        <div class="row">
+          ${o.mdm.bound && canFirst ? '<button class="btn sm ghost" data-act="unbind-mdm">解除绑定</button>' : ''}
+          ${canFirst && ['pending_first', 'pending_final'].indexOf(o.status) > -1 ? `<button class="btn sm" data-act="bind-mdm">${o.mdm.bound ? '修改序列号' : '绑定监管锁'}</button>` : ''}
+        </div>
+      </div>
+      <div class="kv two">
+        ${kv('监管锁序列号', o.mdm.bound ? `<span class="mono">${U.esc(o.mdm.serial)}</span>` : '<span style="color:#B42318">未绑定</span>')}
+        ${kv('绑定状态', o.mdm.bound ? '<span class="pill green">已启用</span>' : '<span class="pill gray">未绑定</span>')}
+        ${kv('服务商', U.esc(o.mdm.provider || '准福 MDM'))}
+        ${kv('绑定账号', `<span class="mono">${U.esc(o.mdm.account || '389346380')}</span>`)}
+        ${kv('绑定时间', U.esc(o.mdm.boundAt || '—'))}
+        ${kv('绑定方式', U.esc(o.mdm.source || '—'))}${kv('绑定人', U.esc(o.mdm.boundBy || '—'))}${kv('设备锁定', U.esc(o.deviceLock))}
+      </div>
+      <div class="alert info mt12">准富未开放接口、后台登录需验证码，暂无法自动同步：点击「绑定监管锁」会带出 IMEI 并跳转准富平台，绑定 / 锁机后回填序列号，系统记录操作人与时间。</div>
+
+      <div class="row-between mb12 mt24">
+        <div class="section-title" style="margin:0">门店收款信息</div>
+        ${editable ? '<button class="btn sm" data-act="edit-payee">修改 / 补录</button>' : ''}
+      </div>
+      <div class="kv two">
+        ${kv('收款人姓名', U.esc(p.name || '—'))}${kv('收款账号', `<span class="mono">${U.esc(p.account || '—')}</span>`)}
+        ${kv('开户行', U.esc(p.bank || '—'))}${kv('收款二维码', p.qr ? '已上传' : '<span style="color:#B42318">未上传</span>')}
+      </div>
+
+      <div class="side-block">
+        <div class="side-title">财务与放款</div>
+        <div class="kv two">
+          ${kv('放款金额', `<b>${U.currency(o.plan.price - (o.plan.downPayment || 0))}</b>`)}
+          ${kv('财务状态', U.esc(o.finance.status))}
+          ${kv('审批人 / 时间', U.esc(o.finance.by || '—') + ' · ' + U.esc(o.finance.at || '—'))}
+          ${kv('放款状态', U.esc(o.payout.status))}
+          ${kv('放款时间', U.esc(o.payout.at || '—'))}
+          ${kv('银行回单号', `<span class="mono">${U.esc(o.payout.ref || '—')}</span>`)}
+        </div>
+        ${o.finance.note ? `<div class="warn-line mt8">财务备注：${U.esc(o.finance.note)}</div>` : ''}
+      </div>`;
+  }
+
+  function logTab() {
+    const logs = (o.logs || []).slice().reverse();
+    return `<div class="section-title">操作日志 <span class="card-sub">共 ${logs.length} 条 · 只增不删</span></div>
+      ${logs.length ? `<div class="timeline">${logs.map(l => `<div class="tl-item done">
+        <div class="tl-title">${U.esc(l.action)}</div>
+        <div class="tl-sub">${U.esc(l.at)} · ${U.esc(l.by || '—')} / ${U.esc(l.role || '—')}</div>
+        ${(l.before || l.after) ? `<div class="tl-sub">${U.esc(l.before || '—')} → ${U.esc(l.after || '—')}</div>` : ''}
+        ${l.note ? `<div class="tl-sub">说明：${U.esc(l.note)}</div>` : ''}
+      </div>`).join('')}</div>` : '<div class="empty">暂无操作日志</div>'}`;
+  }
+
+  /* ================= 右侧操作台 ================= */
+  function renderSide() {
+    const s = o.status;
+    let html = '';
+    if (s === 'pending_first') html = sideFirst();
+    else if (s === 'pending_customer_sign') html = sideSigning();
+    else if (s === 'pending_final') html = sideFinal();
+    else if (s === 'approved_final') html = sideToFinance();
+    else if (s === 'pending_finance') html = sideFinance();
+    else if (s === 'pending_payout') html = sidePayout();
+    else if (s === 'rejected_first' || s === 'rejected_final') html = sideRejected();
+    else html = sideAfter();
+    document.getElementById('side').innerHTML = html;
+    bindChecks();
+  }
+
+  function checksHtml(list, prefix) {
+    return `<div class="checklist">${list.map((c, i) => `
+      <label class="check" data-check="${prefix}-${i}">
+        <input type="checkbox" checked>
+        <span><span class="k">${c[0]}</span>${c[1] ? `<span class="d">${c[1]}</span>` : ''}</span>
+      </label>`).join('')}</div>`;
+  }
+  function bindChecks() {
+    document.querySelectorAll('.check').forEach(el => {
+      const inp = el.querySelector('input');
+      const sync = () => el.classList.toggle('on', inp.checked);
+      sync(); inp.addEventListener('change', sync);
+    });
+  }
+  function checkedCount() {
+    const all = document.querySelectorAll('.check input');
+    return { total: all.length, n: Array.from(all).filter(i => i.checked).length };
+  }
+
+  function card(title, body) {
+    return `<div class="card"><div class="card-head"><div class="card-title">${title}</div></div><div class="card-body">${body}</div></div>`;
+  }
+
+  function reqChips() {
+    return `<div class="req-chips">
+      <span class="req-chip ${o.esign.status === '已签署' ? 'ok' : 'no'}">电子签约 ${o.esign.status === '已签署' ? '已完成' : '未完成'}</span>
+      <span class="req-chip ${o.mdm.bound ? 'ok' : 'no'}">MDM ${o.mdm.bound ? '已绑定' : '未绑定'}</span>
+      <span class="req-chip ${o.payee && o.payee.account ? 'ok' : 'no'}">收款信息 ${o.payee && o.payee.account ? '已填写' : '缺失'}</span>
+      <span class="req-chip ${o.docs.id_front && o.docs.bank_statement ? 'ok' : 'no'}">资料 ${requiredDone()} 项</span>
+    </div>`;
+  }
+  function requiredDone() {
+    const req = MOCK.DOC_TYPES.filter(t => t.required);
+    return `${req.filter(t => o.docs[t.key]).length}/${req.length}`;
+  }
+
+  function sideFirst() {
+    const gate = [];
+    if (o.esign.status !== '已签署') gate.push('电子签约未完成');
+    if (!o.mdm.bound) gate.push('MDM 未绑定');
+    if (!o.payee || !o.payee.account) gate.push('门店收款信息缺失');
+    const body = canFirst ? `
+      ${reqChips()}
+      ${gate.length ? `<div class="warn-line mt12">初审通过前需完成：${gate.join('、')}</div>` : '<div class="alert ok mt12">三项前置条件已满足，可点击初审通过。</div>'}
+      <div class="side-block">
+        <div class="side-title">资料核对清单</div>
+        ${checksHtml(FIRST_CHECKS, 'first')}
+      </div>
+      <div class="side-block">
+        <div class="field" style="margin-bottom:10px">
+          <div class="label">审核备注</div>
+          <textarea class="textarea" id="firstNote" placeholder="补充说明；驳回时必填"></textarea>
+        </div>
+        <div class="row-list">
+          <button class="btn primary block" data-act="first-pass">初审通过 · 转终审</button>
+          <button class="btn danger block" data-act="first-reject">驳回，退回业务员</button>
+        </div>
+      </div>`
+      : `<div class="alert info">当前角色无初审权限，请用「初审专员 / 管理员」登录。</div>${reqChips()}`;
+    return card('初审操作台', body);
+  }
+
+  function sideSigning() {
+    return card('等待客户签约', `
+      <div class="alert info">已人工上传客户资料到 MobiFone，等待客户完成 KYC 与签署；签约结果需回到「电子签约」页签人工回填。</div>
+      <div class="kv mt12">
+        <div class="kv-k">上传表格</div><div class="kv-v">${U.esc(o.esign.fileName || '—')}</div>
+        <div class="kv-k">上传时间</div><div class="kv-v">${U.esc(o.esign.uploadedAt || '—')}</div>
+        <div class="kv-k">合同号</div><div class="kv-v mono">${U.esc(o.esign.contractNo || '待回填')}</div>
+        <div class="kv-k">MDM</div><div class="kv-v">${o.mdm.bound ? '已绑定 ' + U.esc(o.mdm.serial) : '未绑定（可趁等待期补齐）'}</div>
+      </div>
+      <div class="side-block">
+        <div class="side-title">回填 MobiFone 签署结果</div>
+        <div class="row-list">
+          <button class="btn success block" data-act="sign-ok">回填签署成功</button>
+          <button class="btn danger block" data-act="sign-fail">回填签署失败</button>
+        </div>
+        <div class="mini-note mt8">成功需填写合同号；MDM 已绑定 → 转终审，未绑定 → 回到初审待办；失败需填写原因，退回初审后可重新上传。</div>
+      </div>
+      <div class="side-block">
+        <button class="btn block ghost" data-act="add-note">添加跟进备注</button>
+      </div>`);
+  }
+
+  function sideFinal() {
+    const body = canFinal ? `
+      <div class="kv">
+        <div class="kv-k">签约状态</div><div class="kv-v">已签署（${U.esc(o.esign.contractNo)}）</div>
+        <div class="kv-k">MDM</div><div class="kv-v mono">${U.esc(o.mdm.serial)}</div>
+        <div class="kv-k">放款金额</div><div class="kv-v"><b>${U.currency(o.plan.price - (o.plan.downPayment || 0))}</b></div>
+      </div>
+      <div class="side-block">
+        <div class="side-title">终审核对清单</div>
+        ${checksHtml(FINAL_CHECKS, 'final')}
+      </div>
+      <div class="side-block">
+        <div class="field" style="margin-bottom:10px">
+          <div class="label">终审备注</div>
+          <textarea class="textarea" id="finalNote" placeholder="驳回时必填"></textarea>
+        </div>
+        <div class="row-list">
+          <button class="btn primary block" data-act="final-pass">终审通过 · 待送财务</button>
+          <button class="btn danger block" data-act="final-reject">驳回</button>
+        </div>
+      </div>`
+      : `<div class="alert info">当前角色无终审权限。</div>`;
+    return card('终审操作台', body);
+  }
+
+  function sideToFinance() {
+    return card('终审通过 · 待送财务', `
+      <div class="alert ok">资料、签约、MDM 均已确认。选择送财务后进入放款审批队列。</div>
+      <div class="side-block">
+        <div class="side-title">放款摘要</div>
+        <div class="kv">
+          <div class="kv-k">收款人</div><div class="kv-v">${U.esc(o.payee.name)}</div>
+          <div class="kv-k">账号</div><div class="kv-v mono">${U.esc(o.payee.account)}</div>
+          <div class="kv-k">开户行</div><div class="kv-v">${U.esc(o.payee.bank)}</div>
+          <div class="kv-k">金额</div><div class="kv-v"><b>${U.currency(o.plan.price - (o.plan.downPayment || 0))}</b></div>
+        </div>
+      </div>
+      <div class="row-list mt12">
+        <button class="btn primary block" data-act="send-finance">一键发送财务审核</button>
+        <button class="btn block" data-act="urgent">${o.urgent ? '取消加急标记' : '标记加急处理'}</button>
+      </div>
+      <div class="mini-note mt8">也可以在订单池勾选多单，批量发送财务。</div>`);
+  }
+
+  function sideFinance() {
+    const amt = o.plan.price - (o.plan.downPayment || 0);
+    const body = canFin ? `
+      <div class="kv">
+        <div class="kv-k">收款人</div><div class="kv-v">${U.esc(o.payee.name)}</div>
+        <div class="kv-k">账号</div><div class="kv-v mono">${U.esc(o.payee.account)}</div>
+        <div class="kv-k">开户行</div><div class="kv-v">${U.esc(o.payee.bank)}</div>
+        <div class="kv-k">放款金额</div><div class="kv-v"><b>${U.currency(amt)}</b></div>
+        <div class="kv-k">机型</div><div class="kv-v">${U.esc(o.device.model)} ${U.esc(o.device.capacity)}</div>
+      </div>
+      ${o.finance.status === '已退回' ? `<div class="warn-line mt8">上次退回：${U.esc(o.finance.note)}</div>` : ''}
+      <div class="side-block">
+        <div class="field" style="margin-bottom:10px">
+          <div class="label">财务备注</div>
+          <textarea class="textarea" id="finNote" placeholder="退回时填写原因"></textarea>
+        </div>
+        <div class="row-list">
+          <button class="btn primary block" data-act="fin-approve">审批通过 · 待放款</button>
+          <button class="btn danger block" data-act="fin-reject">退回终审</button>
+        </div>
+      </div>`
+      : `<div class="alert info">当前角色无财务审批权限。</div>`;
+    return card('财务审批', body);
+  }
+
+  function sidePayout() {
+    const amt = o.plan.price - (o.plan.downPayment || 0);
+    return card('待放款', `
+      <div class="alert warn">财务审批已通过。汇总信息用于银行软件操作，打款完成后回填回单号。</div>
+      <div class="kv mt12">
+        <div class="kv-k">收款人</div><div class="kv-v">${U.esc(o.payee.name)}</div>
+        <div class="kv-k">账号</div><div class="kv-v mono">${U.esc(o.payee.account)}</div>
+        <div class="kv-k">开户行</div><div class="kv-v">${U.esc(o.payee.bank)}</div>
+        <div class="kv-k">放款金额</div><div class="kv-v total">${U.currency(amt)}</div>
+        <div class="kv-k">机型</div><div class="kv-v">${U.esc(o.device.model)} ${U.esc(o.device.capacity)} · IMEI ${U.esc(o.device.imei)}</div>
+      </div>
+      <div class="row-list mt12">
+        <button class="btn primary block" data-act="payout">标记已放款</button>
+      </div>
+      <div class="mini-note mt8">打款由财务在银行软件内完成，系统只做汇总与状态回写；银行打款回执回调已预留，接入后自动更新放款状态，当前先手工回填回单号。</div>`);
+  }
+
+  function sideRejected() {
+    return card('已驳回', `
+      <div class="alert danger">${U.esc(o.rejectReason || '审核未通过')}</div>
+      <div class="side-block">
+        <div class="kv">
+          <div class="kv-k">驳回环节</div><div class="kv-v">${o.status === 'rejected_first' ? '初审' : '终审'}</div>
+          <div class="kv-k">驳回人</div><div class="kv-v">${U.esc((o.review.first || o.review.final || {}).by || '—')}</div>
+          <div class="kv-k">时间</div><div class="kv-v">${U.esc((o.review.first || o.review.final || {}).at || '—')}</div>
+        </div>
+      </div>
+      <div class="row-list mt12">
+        <button class="btn primary block" data-act="resubmit">客户已补齐资料 · 重新提交初审</button>
+        <a class="btn block" href="sales-order-detail.html?id=${o.id}">查看业务员端</a>
+      </div>`);
+  }
+
+  function sideAfter() {
+    const paid = o.bills.filter(b => b.status === 'Paid').length;
+    const unpaid = o.bills.filter(b => b.status === 'Pending').length;
+    const breach = o.bills.filter(b => b.status === 'Breach').length;
+    return card('还款状态', `
+      <div class="kv">
+        <div class="kv-k">已还期数</div><div class="kv-v">${paid} / ${o.bills.length}</div>
+        <div class="kv-k">待还期数</div><div class="kv-v">${unpaid}</div>
+        <div class="kv-k">逾期期数</div><div class="kv-v" style="color:${breach ? '#B42318' : 'inherit'}">${breach}</div>
+        <div class="kv-k">设备状态</div><div class="kv-v">${U.esc(o.deviceLock)}</div>
+        <div class="kv-k">放款回单</div><div class="kv-v mono">${U.esc(o.payout.ref || '—')}</div>
+      </div>
+      <div class="row-list mt12">
+        <a class="btn primary block" href="admin-bills.html?q=${encodeURIComponent(o.no)}">查看账单</a>
+        <a class="btn block" href="admin-bills.html?view=recon&q=${encodeURIComponent(o.no)}">贷后对账</a>
+        <button class="btn ghost block" data-act="add-note">添加备注</button>
+      </div>`);
+  }
+
+  /* ================= 交互 ================= */
+  const overlay = document.getElementById('overlay');
+  function openModal(title, body, foot) {
+    overlay.innerHTML = `<div class="modal">
+      <div class="modal-head"><div class="modal-title">${title}</div><button class="x" data-close>×</button></div>
+      <div class="modal-body">${body}</div>
+      ${foot ? `<div class="modal-foot">${foot}</div>` : ''}
+    </div>`;
+    overlay.classList.add('open');
+    overlay.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeModal));
+  }
+  function closeModal() { overlay.classList.remove('open'); overlay.innerHTML = ''; }
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+
+  document.addEventListener('click', async e => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    try {
+      if (act === 'download-esign') {
+        const c = o.customer, p = o.plan;
+        const rows = [
+          ['订单号', o.no], ['客户姓名', c.name], ['证件类型', 'CCCD'], ['证件号码', c.idNo],
+          ['手机号', c.phone], ['常居住址', c.address], ['紧急联系人', c.emergencyName],
+          ['紧急联系电话', c.emergencyPhone], ['机型', o.device.model], ['容量', o.device.capacity],
+          ['IMEI', o.device.imei], ['手机总价', p.price], ['首付款', p.downPayment || 0],
+          ['分期额', p.price - (p.downPayment || 0)], ['期数', p.periods], ['每期金额', p.perPeriod],
+          ['首期还款日', p.firstDueDate]
+        ];
+        const csv = '\uFEFF' + rows.map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `客户资料_${o.no}_${c.name}.csv`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+        U.toast('客户资料表格已下载，请上传到 MobiFone');
+      } else if (act === 'start-esign') {
+        openModal('登记 MobiFone 上传', `
+          <div class="alert info">先在 MobiFone 后台用下载的客户资料表格完成录入与发起签署，再回到这里登记表格文件名。</div>
+          <div class="field mt12"><div class="label">已上传的表格文件名<span class="req">*</span></div>
+            <input class="input" id="esignFile" placeholder="例如 客户资料_N20261114001234501_NguyenVanA.xlsx" value="${U.esc(o.esign.fileName || '')}"></div>
+          <div class="mini-note">登记后订单进入「待客户签约」，系统只做记录，不自动建合同、不发短信。</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="esignSave">确认登记</button>`);
+        document.getElementById('esignSave').addEventListener('click', async () => {
+          try {
+            await API.startEsign(o.id, Shell.roleInfo().name, document.getElementById('esignFile').value);
+            closeModal(); await load(); U.toast('已登记上传，等待客户在 MobiFone 完成签署');
+          } catch (err) { U.toast(err.message, 'err'); }
+        });
+      } else if (act === 'sign-ok') {
+        openModal('回填签署成功', `
+          <div class="field"><div class="label">MobiFone 合同号<span class="req">*</span></div>
+            <input class="input mono" id="esignNo" placeholder="从 MobiFone 后台复制合同号"></div>
+          <div class="mini-note mt8">回填后订单标记为已签署；MDM 已绑定则流转终审，未绑定退回初审。</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="signOkSave">确认回填</button>`);
+        document.getElementById('signOkSave').addEventListener('click', async () => {
+          try {
+            await API.simulateSign(o.id, true, '', Shell.roleInfo().name, document.getElementById('esignNo').value);
+            closeModal(); await load();
+            U.toast(o.status === 'pending_final' ? '签署成功，已流转终审' : '签署成功，请绑定 MDM 后初审通过');
+          } catch (err) { U.toast(err.message, 'err'); }
+        });
+      } else if (act === 'sign-fail') {
+        openModal('回填签署失败', `
+          <div class="field"><div class="label">失败原因<span class="req">*</span></div>
+            <textarea class="textarea" id="signFailReason" placeholder="例如 客户人脸识别未通过 / 客户放弃签署"></textarea></div>
+          <div class="mini-note mt8">回填后订单退回初审，可重新下载表格再次签约。</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn danger" id="signFailSave">确认回填</button>`);
+        document.getElementById('signFailSave').addEventListener('click', async () => {
+          try {
+            await API.simulateSign(o.id, false, document.getElementById('signFailReason').value, Shell.roleInfo().name, '');
+            closeModal(); await load(); U.toast('已回填签署失败，订单退回初审', 'err');
+          } catch (err) { U.toast(err.message, 'err'); }
+        });
+      } else if (act === 'bind-mdm') {
+        openModal('绑定监管锁', `
+          <div class="field"><div class="label">监管锁序列号<span class="req">*</span></div>
+            <input class="input mono" id="mdmSerial" placeholder="准富后台显示的序列号" value="${U.esc(o.mdm.serial || '')}"></div>
+          <div class="field"><div class="label">设备 IMEI<span class="req">*</span></div>
+            <input class="input mono" id="mdmImei" placeholder="15 位 IMEI" value="${U.esc(o.mdm.imei || o.device.imei || '')}"></div>
+          <div class="row mt8">
+            <button class="btn sm ghost" id="copyImei">复制 IMEI</button>
+            <a class="btn sm ghost" href="${U.esc(MOCK.MDM_URL || 'https://mdm.zhunfu.cc')}" target="_blank" rel="noopener">打开监管锁后台 ↗</a>
+          </div>
+          <div class="mini-note mt8">准富后台登录需短信验证码，无法由本系统代登。请用账号 <span class="mono">${U.esc((o.mdm.account || '389346380'))}</span> 登录并绑定该 IMEI，成功后把序列号和 IMEI 填到上面保存，系统会记录为“人工绑定”。</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="mdmSave">保存绑定结果</button>`);
+        document.getElementById('copyImei').addEventListener('click', async () => {
+          const v = document.getElementById('mdmImei').value;
+          try { await navigator.clipboard.writeText(v); U.toast('IMEI 已复制'); }
+          catch (e) { document.getElementById('mdmImei').select(); U.toast('请手动复制'); }
+        });
+        document.getElementById('mdmSave').addEventListener('click', async () => {
+          try {
+            await API.bindMdm(
+              o.id,
+              document.getElementById('mdmSerial').value,
+              document.getElementById('mdmImei').value,
+              Shell.roleInfo().name
+            );
+            closeModal(); await load(); U.toast('监管锁绑定结果已记录');
+          } catch (err) { U.toast(err.message, 'err'); }
+        });
+      } else if (act === 'unbind-mdm') {
+        openModal('解除监管锁绑定', `
+          <div class="field"><div class="label">解绑原因<span class="req">*</span></div>
+            <textarea class="textarea" id="unbindNote" placeholder="例如 设备退货 / 型号录错需重新绑定"></textarea></div>
+          <div class="mini-note mt8">解除后设备将不再受监管锁保护，操作会记录到订单日志。</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn danger" id="unbindSave">确认解绑</button>`);
+        document.getElementById('unbindSave').addEventListener('click', async () => {
+          try {
+            await API.unbindMdm(o.id, document.getElementById('unbindNote').value, Shell.roleInfo().name);
+            closeModal(); await load(); U.toast('已解除监管锁绑定');
+          } catch (err) { U.toast(err.message, 'err'); }
+        });
+      } else if (act === 'edit-profile') {
+        const c = o.customer;
+        openModal('二次编辑客户资料', `
+          <div class="form-grid">
+            <div class="field"><div class="label">姓名</div><input class="input" id="e_name" value="${U.esc(c.name)}"></div>
+            <div class="field"><div class="label">手机号</div><input class="input" id="e_phone" value="${U.esc(c.phone)}"></div>
+            <div class="field"><div class="label">证件号码</div><input class="input" id="e_id" value="${U.esc(c.idNo)}"></div>
+            <div class="field"><div class="label">紧急联系人</div><input class="input" id="e_em" value="${U.esc(c.emergencyName)}"></div>
+            <div class="field full"><div class="label">常居住址</div><input class="input" id="e_addr" value="${U.esc(c.address)}"></div>
+            <div class="field"><div class="label">紧急联系人电话</div><input class="input" id="e_emp" value="${U.esc(c.emergencyPhone)}"></div>
+            <div class="field"><div class="label">关系</div><input class="input" id="e_rel" value="${U.esc(c.emergencyRelation)}"></div>
+          </div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="saveProfile">保存</button>`);
+        document.getElementById('saveProfile').addEventListener('click', async () => {
+          await API.updateOrder(o.id, {
+            customer: {
+              name: document.getElementById('e_name').value,
+              phone: document.getElementById('e_phone').value,
+              idNo: document.getElementById('e_id').value,
+              address: document.getElementById('e_addr').value,
+              emergencyName: document.getElementById('e_em').value,
+              emergencyPhone: document.getElementById('e_emp').value,
+              emergencyRelation: document.getElementById('e_rel').value
+            }
+          }, Shell.roleInfo().name, Shell.role());
+          closeModal(); await load(); U.toast('客户资料已更新');
+        });
+      } else if (act === 'edit-plan') {
+        const p = o.plan;
+        openModal('调整分期方案', `
+          <div class="form-grid">
+            <div class="field"><div class="label">手机总价</div><input class="input num" id="p_price" value="${p.price}"></div>
+            <div class="field"><div class="label">首付</div><input class="input num" id="p_down" value="${p.downPayment || 0}"></div>
+            <div class="field"><div class="label">期数</div><input class="input num" id="p_periods" value="${p.periods}"></div>
+            <div class="field"><div class="label">每期金额（留空自动算）</div><input class="input num" id="p_per" value="${p.perPeriod}"></div>
+          </div>
+          <div class="mini-note">保存后自动重算还款计划；已放款订单不可调整。</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="savePlan">保存</button>`);
+        document.getElementById('savePlan').addEventListener('click', async () => {
+          await API.updateOrder(o.id, {
+            plan: {
+              price: document.getElementById('p_price').value,
+              downPayment: document.getElementById('p_down').value,
+              periods: document.getElementById('p_periods').value,
+              perPeriod: document.getElementById('p_per').value
+            }
+          }, Shell.roleInfo().name, Shell.role());
+          closeModal(); await load(); U.toast('分期方案已更新');
+        });
+      } else if (act === 'edit-payee') {
+        const p = o.payee || {};
+        openModal('门店收款信息', `
+          <div class="field"><div class="label">收款人姓名</div><input class="input" id="y_name" value="${U.esc(p.name || '')}"></div>
+          <div class="field"><div class="label">收款账号</div><input class="input" id="y_acc" value="${U.esc(p.account || '')}"></div>
+          <div class="field"><div class="label">开户行</div><input class="input" id="y_bank" value="${U.esc(p.bank || '')}"></div>
+          <div class="upload-slot" data-qr>${p.qr ? '二维码已上传' : '上传收款二维码（点击模拟）'}</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="savePayee">保存</button>`);
+        let qr = p.qr || '';
+        overlay.querySelector('[data-qr]').addEventListener('click', () => {
+          qr = 'QR_' + Date.now().toString().slice(-6) + '.png';
+          overlay.querySelector('[data-qr]').textContent = '二维码已上传';
+        });
+        document.getElementById('savePayee').addEventListener('click', async () => {
+          await API.updateOrder(o.id, {
+            payee: {
+              name: document.getElementById('y_name').value,
+              account: document.getElementById('y_acc').value,
+              bank: document.getElementById('y_bank').value,
+              qr
+            }
+          }, Shell.roleInfo().name);
+          closeModal(); await load(); U.toast('门店收款信息已保存');
+        });
+      } else if (act === 'first-pass') {
+        const c = checkedCount();
+        if (c.n < c.total && !confirm(`还有 ${c.total - c.n} 项未勾选，确认初审通过？`)) return;
+        await API.reviewFirst(o.id, { result: 'pass', note: document.getElementById('firstNote').value, checks: c });
+        await load(); U.toast('初审已通过，转终审');
+      } else if (act === 'first-reject') {
+        const note = document.getElementById('firstNote').value.trim();
+        if (!note) { U.toast('驳回请填写原因', 'err'); return; }
+        await API.reviewFirst(o.id, { result: 'reject', note });
+        await load(); U.toast('已驳回并退回业务员');
+      } else if (act === 'final-pass') {
+        await API.reviewFinal(o.id, { result: 'pass', note: document.getElementById('finalNote').value });
+        await load(); U.toast('终审通过，等待送财务');
+      } else if (act === 'final-reject') {
+        const note = document.getElementById('finalNote').value.trim();
+        if (!note) { U.toast('驳回请填写原因', 'err'); return; }
+        await API.reviewFinal(o.id, { result: 'reject', note });
+        await load(); U.toast('已驳回');
+      } else if (act === 'send-finance') {
+        const n = await API.sendToFinance([o.id]);
+        await load(); U.toast(n ? '已发送财务审核' : '当前状态不可送财务', n ? 'ok' : 'err');
+      } else if (act === 'urgent') {
+        await API.markUrgent([o.id], !o.urgent);
+        await load(); U.toast(o.urgent ? '已标记加急' : '已取消加急');
+      } else if (act === 'fin-approve') {
+        await API.financeApprove([o.id], Shell.roleInfo().name);
+        await load(); U.toast('财务审批通过，等待放款');
+      } else if (act === 'fin-reject') {
+        const note = document.getElementById('finNote').value.trim();
+        if (!note) { U.toast('退回请填写原因', 'err'); return; }
+        await API.financeReject(o.id, note, Shell.roleInfo().name);
+        await load(); U.toast('已退回终审');
+      } else if (act === 'payout') {
+        openModal('标记已放款', `
+          <div class="field"><div class="label">银行回单号 / 交易号</div>
+            <input class="input" id="payRef" placeholder="例如 VCB-20261115-0034"></div>
+          <div class="mini-note">财务在银行软件完成转账后回填，系统据此把订单置为还款中并开始计账单。</div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="doPay">确认已放款</button>`);
+        document.getElementById('doPay').addEventListener('click', async () => {
+          await API.markPayout(o.id, document.getElementById('payRef').value);
+          closeModal(); await load(); U.toast('已标记放款，订单进入还款中');
+        });
+      } else if (act === 'resubmit') {
+        await API.resubmit(o.id);
+        await load(); U.toast('已重新提交初审');
+      } else if (act === 'add-note') {
+        openModal('添加备注', `<div class="field"><div class="label">备注内容</div><textarea class="textarea" id="noteText" placeholder="例如：已电话联系客户，明日补交流水"></textarea></div>`,
+          `<button class="btn" data-close>取消</button><button class="btn primary" id="saveNote">保存</button>`);
+        document.getElementById('saveNote').addEventListener('click', async () => {
+          const t = document.getElementById('noteText').value.trim();
+          if (!t) { U.toast('请输入备注', 'err'); return; }
+          await API.addNote(o.id, t, Shell.roleInfo().name);
+          closeModal(); await load(); U.toast('已添加备注');
+        });
+      }
+    } catch (err) {
+      U.toast(err.message || '操作失败', 'err');
+    }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

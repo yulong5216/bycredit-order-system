@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客户档案 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">客户档案</div>
+          <div class="page-sub" id="pageSub">全部客户 · 加载中…</div>
+        </div>
+        <div class="row"></div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card">
+        <div class="toolbar">
+          <div class="search"><input id="q" placeholder="姓名 / 电话 / 证件号 / 地址"></div>
+          <select class="select mini" id="status">
+            <option value="all">全部状态</option>
+            <option value="normal">正常</option>
+            <option value="repaying">还款中</option>
+            <option value="overdue">逾期</option>
+          </select>
+          <button class="btn sm" id="searchBtn">查询</button>
+          <button class="btn sm ghost" id="clearBtn">清空</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>客户</th>
+                <th>证件号</th>
+                <th>常居住址</th>
+                <th class="t-right">订单数</th>
+                <th class="t-right">累计金额</th>
+                <th>最近下单</th>
+                <th>设备</th>
+                <th>风险状态</th>
+                <th class="t-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="pager"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  Shell.mount({ nav: 'customers', crumb: '资料与合同 / <b>客户档案</b>' });
+
+  const state = { q: '', status: 'all', page: 1, size: 12 };
+  let all = [];
+  let view = [];
+
+  const RISK = {
+    normal: { label: '正常', tone: 'green' },
+    repaying: { label: '还款中', tone: 'blue' },
+    overdue: { label: '逾期', tone: 'red' }
+  };
+
+  const sumTotal = arr => arr.reduce((s, c) => s + c.total, 0);
+
+  function maskId(v) {
+    const s = String(v || '');
+    if (s.length <= 6) return s || '—';
+    return s.slice(0, 4) + '****' + s.slice(-4);
+  }
+
+  function riskPill(status) {
+    const r = RISK[status] || { label: status || '未知', tone: 'gray' };
+    return `<span class="pill ${r.tone}">${U.esc(r.label)}</span>`;
+  }
+
+  function rowHtml(c) {
+    const href = 'admin-orders.html?q=' + encodeURIComponent(c.phone);
+    const extra = c.models.length > 1 ? ` <span class="faint">+${c.models.length - 1}</span>` : '';
+    return `<tr onclick="location.href='${href}'">
+      <td>
+        <div class="strong">${U.esc(c.name)}</div>
+        <div class="sub mono">${U.esc(c.phone)}</div>
+      </td>
+      <td class="mono">${U.esc(maskId(c.idNo))}</td>
+      <td>
+        <div class="small" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${U.esc(c.address)}">${U.esc(c.address)}</div>
+      </td>
+      <td class="t-right num">${c.orders}</td>
+      <td class="t-right money strong">${U.currency(c.total)}</td>
+      <td class="small">${U.esc(c.lastAt || '—')}</td>
+      <td>
+        <div>${U.esc(c.models[0] || '—')}${extra}</div>
+        <div class="sub">${c.models.length > 1 ? '共 ' + c.models.length + ' 台设备' : ''}</div>
+      </td>
+      <td>${riskPill(c.status)}</td>
+      <td class="t-right" onclick="event.stopPropagation()">
+        <a class="btn sm" href="admin-orders.html?q=${encodeURIComponent(c.phone)}">查看订单</a>
+      </td>
+    </tr>`;
+  }
+
+  function renderKpis() {
+    const repeat = all.filter(c => c.orders > 1).length;
+    const overdue = all.filter(c => c.status === 'overdue').length;
+    const kpis = [
+      { label: '客户总数', value: all.length, unit: '人', foot: '按证件号去重' },
+      { label: '复购客户数', value: repeat, unit: '人', foot: '下单 2 单及以上的客户' },
+      { label: '逾期客户数', value: overdue, unit: '人', foot: '存在逾期或坏账订单' },
+      { label: '累计合同金额', value: U.currency(sumTotal(all)), foot: `覆盖 ${all.reduce((s, c) => s + c.orders, 0)} 份订单` }
+    ];
+    document.getElementById('kpis').innerHTML = kpis.map(k => `
+      <div class="kpi">
+        <div class="kpi-label">${k.label}</div>
+        <div class="kpi-value">${k.value}${k.unit ? `<small>${k.unit}</small>` : ''}</div>
+        <div class="kpi-foot">${k.foot}</div>
+      </div>`).join('');
+  }
+
+  function renderPager(pages) {
+    let btns = `<button class="pg" ${state.page === 1 ? 'disabled' : ''} data-p="${state.page - 1}">上一页</button>`;
+    for (let i = 1; i <= pages; i++) {
+      btns += `<button class="pg ${i === state.page ? 'active' : ''}" data-p="${i}">${i}</button>`;
+    }
+    btns += `<button class="pg" ${state.page === pages ? 'disabled' : ''} data-p="${state.page + 1}">下一页</button>`;
+    document.getElementById('pager').innerHTML =
+      `<span>第 ${state.page} / ${pages} 页 · 共 ${view.length} 人</span><div class="pager-btns">${btns}</div>`;
+    document.querySelectorAll('.pg').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      state.page = Number(b.dataset.p);
+      render();
+    }));
+  }
+
+  function render() {
+    const k = state.q.trim().toLowerCase();
+    view = all.filter(c => {
+      if (state.status !== 'all' && c.status !== state.status) return false;
+      if (k) {
+        const hay = [c.name, c.phone, c.idNo, c.address].join(' ').toLowerCase();
+        if (hay.indexOf(k) === -1) return false;
+      }
+      return true;
+    });
+
+    renderKpis();
+    const statusLabel = { all: '全部状态', normal: '正常', repaying: '还款中', overdue: '逾期' }[state.status];
+    document.getElementById('pageSub').textContent =
+      `${statusLabel} · 共 ${view.length} 人 · 累计 ${U.currency(sumTotal(view))}`;
+
+    const pages = Math.max(1, Math.ceil(view.length / state.size));
+    if (state.page > pages) state.page = pages;
+    const rows = view.slice((state.page - 1) * state.size, state.page * state.size);
+
+    if (!rows.length) {
+      document.getElementById('tbody').innerHTML =
+        `<tr><td colspan="9"><div class="empty"><div class="empty-mark">∅</div>没有符合条件的客户，试试清空筛选条件</div></td></tr>`;
+    } else {
+      document.getElementById('tbody').innerHTML = rows.map(rowHtml).join('');
+    }
+    renderPager(pages);
+  }
+
+  async function load() {
+    document.getElementById('tbody').innerHTML =
+      `<tr><td colspan="9"><div class="empty">加载中…</div></td></tr>`;
+    const res = await API.listCustomers({ size: 999 });
+    all = res.items;
+    render();
+  }
+
+  document.getElementById('searchBtn').addEventListener('click', () => {
+    state.q = document.getElementById('q').value;
+    state.status = document.getElementById('status').value;
+    state.page = 1;
+    render();
+  });
+  document.getElementById('q').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('searchBtn').click();
+  });
+  document.getElementById('status').addEventListener('change', () => {
+    state.status = document.getElementById('status').value;
+    state.page = 1;
+    render();
+  });
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    document.getElementById('q').value = '';
+    document.getElementById('status').value = 'all';
+    Object.assign(state, { q: '', status: 'all', page: 1 });
+    render();
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

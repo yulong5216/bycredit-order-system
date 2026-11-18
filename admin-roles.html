@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>角色与账号 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">角色与账号</div>
+          <div class="page-sub">固定 8 个员工角色 · 动作级权限 · 账号仅供后台登录使用</div>
+        </div>
+        <div class="row"></div>
+      </div>
+
+      <div class="kpis" id="roleCards"></div>
+
+      <div class="card mt16">
+        <div class="card-head">
+          <div>
+            <span class="card-title">动作级权限矩阵</span>
+            <span class="card-sub">✓ 可操作 · — 无权限 · 管理员默认全权限</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table compact">
+            <thead id="matrixHead"></thead>
+            <tbody id="matrixBody"></tbody>
+          </table>
+        </div>
+        <div class="card-body" style="padding-top:12px">
+          <div class="mini-note">管理员自动拥有全部动作权限；新增操作时只需在统一权限配置对应分组添加一项，矩阵和页面动作判断即可自动生效。财务是流程最终节点，打款回执回调暂作为预留接口。</div>
+        </div>
+      </div>
+
+      <div class="card mt16">
+        <div class="card-head">
+          <div>
+            <span class="card-title">账号列表</span>
+            <span class="card-sub" id="accCount">共 0 个账号</span>
+          </div>
+          <button class="btn sm primary" id="addAcc">＋ 新增账号</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>姓名</th>
+                <th>登录账号</th>
+                <th>角色</th>
+                <th>所属门店</th>
+                <th>状态</th>
+                <th>最近登录</th>
+                <th class="t-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modalTitle">新增账号</div>
+      <button class="x" id="modalClose">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  Shell.mount({ nav: 'roles', crumb: '运营与系统 / <b>角色与账号</b>' });
+
+  const $ = s => document.querySelector(s);
+
+  const ROLES = [
+    { key: 'admin', name: '管理员', lines: ['全系统配置、账号与门店管理', '默认拥有全部动作权限'] },
+    { key: 'sales', name: '业务员', lines: ['移动端录单、采集客户资料', '仅查看本人订单，不进入审核工作界面'] },
+    { key: 'manager', name: '门店店长', lines: ['查看本店订单与业务员进度', '补充客户资料、维护本店资料'] },
+    { key: 'first', name: '初审专员', lines: ['核对资料、发起电子签约、绑定 MDM', '执行初审通过或退回，不进入业务录单端'] },
+    { key: 'final', name: '终审专员', lines: ['复核资料、放款信息与 MDM', '终审通过后批量送财务'] },
+    { key: 'finance', name: '财务', lines: ['审批放款、导出财务明细', '标记放款、登记还款与回填回单'] },
+    { key: 'aftercare', name: '贷后管理', lines: ['流水对账、代客登记与贷后跟进', '办理延期、坏账标记与催收协同'] },
+    { key: 'collector', name: '催收专员', lines: ['查看逾期账单与订单日志', '跟进催收、登记承诺还款与备注'] }
+  ];
+
+  // 唯一配置位于 assets/shell.js；管理员自动拥有全部动作权限。
+  const PERMISSIONS = Shell.permissionGroups;
+
+  let accounts = [
+    { name: '陈志远', login: 'chen.zy', role: '管理员', store: '总部', status: '启用', last: '2026-11-15 09:12' },
+    { name: '林初审', login: 'lin.cs', role: '初审专员', store: '总部', status: '启用', last: '2026-11-15 08:40' },
+    { name: '周终审', login: 'zhou.zs', role: '终审专员', store: '总部', status: '启用', last: '2026-11-14 18:22' },
+    { name: '王财务', login: 'wang.cw', role: '财务', store: '总部', status: '启用', last: '2026-11-15 09:05' },
+    { name: '黄贷后', login: 'huang.dh', role: '贷后管理', store: '总部', status: '启用', last: '2026-11-14 17:10' },
+    { name: '陈店长', login: 'chen.dz', role: '门店店长', store: 'hanoi', status: '启用', last: '2026-11-15 09:48' },
+    { name: '吴催收', login: 'wu.cs', role: '催收专员', store: '总部', status: '启用', last: '2026-11-15 10:02' },
+    { name: 'MHOA', login: 'mhoa', role: '业务员', store: 'hanoi', status: '启用', last: '2026-11-15 10:31' },
+    { name: 'MBAO', login: 'mbao', role: '业务员', store: 'Hanoi-Topmax 50', status: '停用', last: '2026-11-10 16:45' }
+  ];
+
+  function renderRoleCards() {
+    $('#roleCards').innerHTML = ROLES.map(r => `<div class="card">
+      <div class="card-body">
+        <div class="row-between">
+          <div class="strong">${r.name}</div>
+          ${r.tag ? `<span class="tag">${r.tag}</span>` : ''}
+        </div>
+        ${r.lines.map((l, i) => `<div class="small muted${i === 0 ? ' mt8' : ''}">${l}</div>`).join('')}
+      </div>
+    </div>`).join('');
+  }
+
+  function renderMatrix() {
+    $('#matrixHead').innerHTML = `<tr><th>动作</th>${ROLES.map(r => `<th class="t-center">${r.name}</th>`).join('')}</tr>`;
+    $('#matrixBody').innerHTML = PERMISSIONS.map(group => `
+      <tr><td colspan="${ROLES.length + 1}" class="strong" style="background:#F6F8FB;color:#52647C">${group.group}</td></tr>
+      ${group.actions.map(action => `<tr>
+        <td class="strong">${action.name}</td>
+        ${ROLES.map(role => `<td class="t-center">${role.key === 'admin' || action.roles.includes(role.key)
+          ? '<span style="color:#0E9F6E;font-weight:650">✓</span>'
+          : '<span class="faint">—</span>'}</td>`).join('')}
+      </tr>`).join('')}
+    `).join('');
+  }
+
+  function renderAccounts() {
+    $('#accCount').textContent = `共 ${accounts.length} 个账号`;
+    $('#tbody').innerHTML = accounts.map((a, i) => `<tr>
+      <td class="strong">${U.esc(a.name)}</td>
+      <td class="mono">${U.esc(a.login)}</td>
+      <td>${U.esc(a.role)}</td>
+      <td>${U.esc(a.store)}</td>
+      <td>${a.status === '启用' ? '<span class="pill green">启用</span>' : '<span class="pill gray">停用</span>'}</td>
+      <td class="sub">${U.esc(a.last)}</td>
+      <td class="t-right"><button class="btn sm ghost" data-edit="${i}">编辑</button></td>
+    </tr>`).join('');
+  }
+
+  function closeModal() {
+    $('#overlay').classList.remove('open');
+  }
+
+  function openCreate() {
+    const roleOpts = ROLES.map(r => `<option value="${r.name}">${r.name}</option>`).join('');
+    const storeOpts = ['总部'].concat(MOCK.STORES.map(s => s.name))
+      .map(n => `<option value="${U.esc(n)}">${U.esc(n)}</option>`).join('');
+    $('#modalTitle').textContent = '新增账号';
+    $('#modalBody').innerHTML = `
+      <div class="form-grid">
+        <div class="field"><div class="label">姓名<span class="req">*</span></div><input class="input" id="aName" placeholder="如 Nguyễn Văn A"></div>
+        <div class="field"><div class="label">登录账号<span class="req">*</span></div><input class="input" id="aLogin" placeholder="如 nguyen.abc"></div>
+        <div class="field"><div class="label">角色</div><select class="select" id="aRole">${roleOpts}</select></div>
+        <div class="field"><div class="label">所属门店</div><select class="select" id="aStore">${storeOpts}</select></div>
+      </div>
+      <div class="mini-note">新增账号仅保存在当前浏览器内存中，用于原型演示，不会写入任何后端。</div>`;
+    $('#modalFoot').innerHTML = `
+      <button class="btn" id="mCancel">取消</button>
+      <button class="btn primary" id="saveAcc">保存账号</button>`;
+    $('#overlay').classList.add('open');
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#saveAcc').addEventListener('click', () => {
+      const name = $('#aName').value.trim();
+      const login = $('#aLogin').value.trim();
+      if (!name) { U.toast('请填写姓名', 'err'); return; }
+      if (!login) { U.toast('请填写登录账号', 'err'); return; }
+      if (accounts.some(a => a.login.toLowerCase() === login.toLowerCase())) {
+        U.toast('登录账号已存在', 'err'); return;
+      }
+      accounts.push({
+        name: name,
+        login: login,
+        role: $('#aRole').value,
+        store: $('#aStore').value,
+        status: '启用',
+        last: '—'
+      });
+      closeModal();
+      renderAccounts();
+      U.toast('账号已新增：' + name);
+    });
+  }
+
+  $('#tbody').addEventListener('click', e => {
+    const btn = e.target.closest('[data-edit]');
+    if (btn) U.toast('原型阶段仅演示');
+  });
+
+  $('#addAcc').addEventListener('click', openCreate);
+  $('#modalClose').addEventListener('click', closeModal);
+  $('#overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeModal(); });
+
+  renderRoleCards();
+  renderMatrix();
+  renderAccounts();
+})();
+</script>
+</body>
+</html>

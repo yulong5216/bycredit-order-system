@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>合同管理 · BY Credit</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="sidebar" id="appSidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="appTopbar"></header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">合同管理</div>
+          <div class="page-sub" id="pageSub">全部合同 · 加载中…</div>
+        </div>
+        <div class="row">
+          <a class="btn" href="admin-orders.html">前往订单池</a>
+        </div>
+      </div>
+
+      <div class="alert info mb16">
+        <div>电子签约采用人工流程：订单详情下载客户资料表格，上传 MobiFone 完成 KYC 与签署后，再回填合同号和签署结果。合同号、上传文件与每次操作均在订单日志中留痕。</div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card">
+        <div class="tabs" id="tabs"></div>
+        <div class="toolbar">
+          <div class="search"><input id="q" placeholder="合同号 / 订单号 / 客户 / 电话"></div>
+          <button class="btn sm" id="searchBtn">查询</button>
+          <button class="btn sm ghost" id="clearBtn">清空</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>合同号</th>
+                <th>订单号</th>
+                <th>客户</th>
+                <th>门店 / 业务员</th>
+                <th>类型</th>
+                <th>签署状态</th>
+                <th>签署时间</th>
+                <th class="t-right">合同金额</th>
+                <th class="t-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="pager"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/shell.js"></script>
+<script>
+(function () {
+  Shell.mount({ nav: 'contracts', crumb: '资料与合同 / <b>合同管理</b>' });
+
+  const TABS = [
+    { key: 'all', label: '全部', test: () => true },
+    { key: 'signed', label: '已签署', test: r => r.signStatus === '已签署' },
+    { key: 'pending', label: '待签署', test: r => r.signStatus !== '已签署' },
+    { key: 'esign', label: '电子签约', test: r => r.type === '电子签约' },
+    { key: 'paper', label: '纸质合同', test: r => r.type === '纸质合同' }
+  ];
+  const state = { tab: 'all', q: U.qs('q') || '', page: 1, size: 12 };
+  let all = [];
+  let view = [];
+
+  document.getElementById('q').value = state.q;
+
+  const curTab = () => TABS.find(t => t.key === state.tab) || TABS[0];
+  const sumAmount = arr => arr.reduce((s, r) => s + r.amount, 0);
+
+  function signPill(s) {
+    if (s === '已签署') return '<span class="pill green">已签署</span>';
+    if (s === '待客户签约') return '<span class="pill purple">待客户签约</span>';
+    if (s && s.indexOf('失败') > -1) return `<span class="pill red">${U.esc(s)}</span>`;
+    return `<span class="pill gray">${U.esc(s || '未签署')}</span>`;
+  }
+
+  function rowHtml(r) {
+    const typeTag = r.type === '电子签约'
+      ? '<span class="tag blue">电子签约</span>'
+      : '<span class="tag">纸质合同</span>';
+    return `<tr>
+      <td>
+        <div class="mono strong">${U.esc(r.contractNo)}</div>
+        ${r.attempt > 1 ? `<div class="sub"><span class="tag purple">第 ${r.attempt} 次</span></div>` : ''}
+      </td>
+      <td class="mono">${U.esc(r.orderNo)}</td>
+      <td>
+        <div class="strong">${U.esc(r.customer)}</div>
+        <div class="sub">${U.esc(r.phone)}</div>
+      </td>
+      <td>
+        <div>${U.esc(r.storeName)}</div>
+        <div class="sub">${U.esc(r.salesName)}</div>
+      </td>
+      <td>${typeTag}</td>
+      <td>${signPill(r.signStatus)}</td>
+      <td class="small">${r.signedAt ? U.esc(r.signedAt) : '<span class="faint">—</span>'}</td>
+      <td class="t-right money strong">${U.currency(r.amount)}</td>
+      <td class="t-right"><a class="btn sm" href="admin-order-detail.html?id=${r.orderId}">查看订单</a></td>
+    </tr>`;
+  }
+
+  function renderTabs() {
+    document.getElementById('tabs').innerHTML = TABS.map(t =>
+      `<div class="tab ${state.tab === t.key ? 'active' : ''}" data-tab="${t.key}">${t.label}<span class="cnt">${all.filter(t.test).length}</span></div>`
+    ).join('');
+    document.querySelectorAll('#tabs .tab').forEach(el => el.addEventListener('click', () => {
+      state.tab = el.dataset.tab;
+      state.page = 1;
+      render();
+    }));
+  }
+
+  function renderKpis() {
+    const signed = all.filter(r => r.signStatus === '已签署');
+    const pending = all.filter(r => r.signStatus !== '已签署');
+    const kpis = [
+      { label: '合同总数', value: all.length, unit: '份', foot: '含电子签约与纸质合同' },
+      { label: '已签署', value: signed.length, unit: '份', foot: '签约完成，可用于放款归档' },
+      { label: '待签署 / 签署中', value: pending.length, unit: '份', foot: '含待客户签约与签署失败' },
+      { label: '已签署合同金额', value: U.currency(sumAmount(signed)), foot: `共 ${signed.length} 份已签署合同` }
+    ];
+    document.getElementById('kpis').innerHTML = kpis.map(k => `
+      <div class="kpi">
+        <div class="kpi-label">${k.label}</div>
+        <div class="kpi-value">${k.value}${k.unit ? `<small>${k.unit}</small>` : ''}</div>
+        <div class="kpi-foot">${k.foot}</div>
+      </div>`).join('');
+  }
+
+  function renderPager(pages) {
+    let btns = `<button class="pg" ${state.page === 1 ? 'disabled' : ''} data-p="${state.page - 1}">上一页</button>`;
+    for (let i = 1; i <= pages; i++) {
+      btns += `<button class="pg ${i === state.page ? 'active' : ''}" data-p="${i}">${i}</button>`;
+    }
+    btns += `<button class="pg" ${state.page === pages ? 'disabled' : ''} data-p="${state.page + 1}">下一页</button>`;
+    document.getElementById('pager').innerHTML =
+      `<span>第 ${state.page} / ${pages} 页 · 共 ${view.length} 条</span><div class="pager-btns">${btns}</div>`;
+    document.querySelectorAll('.pg').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      state.page = Number(b.dataset.p);
+      render();
+    }));
+  }
+
+  function render() {
+    const t = curTab();
+    const k = state.q.trim().toLowerCase();
+    view = all.filter(r => {
+      if (!t.test(r)) return false;
+      if (k) {
+        const hay = [r.contractNo, r.orderNo, r.customer, r.phone].join(' ').toLowerCase();
+        if (hay.indexOf(k) === -1) return false;
+      }
+      return true;
+    });
+
+    renderTabs();
+    renderKpis();
+
+    document.getElementById('pageSub').textContent =
+      `${t.label} · 共 ${view.length} 份 · 已签署 ${view.filter(r => r.signStatus === '已签署').length} 份`;
+
+    const pages = Math.max(1, Math.ceil(view.length / state.size));
+    if (state.page > pages) state.page = pages;
+    const rows = view.slice((state.page - 1) * state.size, state.page * state.size);
+
+    if (!rows.length) {
+      document.getElementById('tbody').innerHTML =
+        `<tr><td colspan="9"><div class="empty"><div class="empty-mark">∅</div>没有符合条件的合同，试试切换页签或清空筛选</div></td></tr>`;
+    } else {
+      document.getElementById('tbody').innerHTML = rows.map(rowHtml).join('');
+    }
+    renderPager(pages);
+  }
+
+  async function load() {
+    document.getElementById('tbody').innerHTML =
+      `<tr><td colspan="9"><div class="empty">加载中…</div></td></tr>`;
+    const res = await API.listContracts({ size: 999 });
+    all = res.items;
+    render();
+  }
+
+  document.getElementById('searchBtn').addEventListener('click', () => {
+    state.q = document.getElementById('q').value;
+    state.page = 1;
+    render();
+  });
+  document.getElementById('q').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('searchBtn').click();
+  });
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    document.getElementById('q').value = '';
+    state.q = '';
+    state.page = 1;
+    render();
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

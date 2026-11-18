@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>新建录单 · BY Credit 业务员</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body class="mobile-body">
+<div class="app">
+  <header class="m-top">
+    <a class="btn sm ghost" href="sales-orders.html">取消</a>
+    <div class="grow" style="text-align:center">
+      <div class="m-title" style="font-size:15px">新建录单</div>
+      <div class="m-sub" id="stepLabel">第 1 / 5 步</div>
+    </div>
+    <span style="width:38px"></span>
+  </header>
+
+  <div class="m-body">
+    <div class="m-stepbar" id="bar"></div>
+    <div class="m-stepper" id="stepper"></div>
+    <div id="content"></div>
+  </div>
+
+  <div class="m-foot" id="foot"></div>
+</div>
+
+<script src="assets/mock.js"></script>
+<script src="assets/store.js"></script>
+<script>
+(function () {
+  const $ = s => document.querySelector(s);
+  const STEPS = ['客户信息', '资料采集', '设备验机', '分期方案', '确认提交'];
+  let step = 1;
+  let pasteSource = '';
+  let parseNotice = false;
+  const form = {
+    customer: {
+      name: '', idType: 'CCCD', idNo: '', phone: '', birthDate: '', gender: '',
+      address: '', currentAddress: '', workCompany: '', workPhone: '',
+      emergencyName: '', emergencyRelation: '', emergencyPhone: '', secondName: '', secondPhone: ''
+    },
+    docs: {},
+    device: { model: '', capacity: '128G', color: '', imei: '', checks: {} },
+    plan: { price: '', downPayment: 0, periods: 6, firstDueDate: '2026-12-08', storeId: '141', salesId: 's5' },
+    payee: { name: '', account: '', bank: '', qr: '' }
+  };
+  const ACTIVE_STORES = MOCK.STORES.filter(s => s.status !== '冻结');
+  if (!ACTIVE_STORES.some(s => s.id === form.plan.storeId)) form.plan.storeId = ACTIVE_STORES.length ? ACTIVE_STORES[0].id : '';
+  (function initPayee() {
+    const st = MOCK.STORES.find(s => s.id === form.plan.storeId);
+    if (st && st.payee) form.payee = Object.assign({ qr: '' }, st.payee);
+  })();
+  const apiCreateOrder = API.createOrder;
+  API.createOrder = async function (payload) {
+    const st = MOCK.STORES.find(s => s.id === payload.plan.storeId);
+    if (st && st.status === '冻结') throw new Error('所选门店已冻结，录单 API 已拦截，请更换门店');
+    return apiCreateOrder.call(API, payload);
+  };
+  const RELATIONS = ['Bố mẹ / 父母', 'Vợ / Chồng / 配偶', 'Anh chị em / 兄弟姐妹', 'Bạn bè / 朋友', 'Khác / 其他'];
+  const MODELS = ['iPhone 11', 'iPhone 11 Pro', 'iPhone 11 Pro Max', 'iPhone 12', 'iPhone 12 Pro', 'iPhone 12 Pro Max', 'iPhone 13', 'iPhone 13 Pro', 'iPhone 13 Pro Max', 'iPhone 14', 'iPhone 14 Plus', 'iPhone 14 Pro', 'iPhone 14 Pro Max', 'iPhone 15', 'iPhone 15 Plus', 'iPhone 15 Pro Max', 'iPhone 16', 'iPhone 16 Pro Max', 'iPhone 17 Pro', 'iPhone 17 Pro Max'];
+  const CAPS = ['64G', '128G', '256G', '512G', '1TB'];
+
+  function money(n) { return U.money(n || 0); }
+  function perPeriod() {
+    const price = Number(form.plan.price || 0), down = Number(form.plan.downPayment || 0), n = Number(form.plan.periods || 1);
+    return Math.max(0, Math.round((price - down) / n));
+  }
+  function requiredDone() {
+    const req = MOCK.DOC_TYPES.filter(t => t.required);
+    return `${req.filter(t => form.docs[t.key]).length} / ${req.length}`;
+  }
+
+  function renderBar() {
+    $('#bar').innerHTML = STEPS.map((s, i) => `<span class="${i < step ? 'on' : ''}"></span>`).join('');
+    $('#stepper').innerHTML = `<b>${STEPS[step - 1]}</b><span>·</span><span>${step} / ${STEPS.length}</span>`;
+    $('#stepLabel').textContent = `第 ${step} / ${STEPS.length} 步`;
+  }
+
+  function fieldHtml(label, id, value, ph, type, req) {
+    return `<div class="field"><div class="label">${label}${req ? '<span class="req">*</span>' : ''}</div>
+      <input class="input" id="${id}" type="${type || 'text'}" value="${U.esc(value)}" placeholder="${ph || ''}"></div>`;
+  }
+
+  const LABEL_KEYS = {
+    '姓名': 'name', '证件类型': 'idType', '证件号': 'idNo', '手机号': 'phone',
+    '出生日期': 'birthDate', '性别': 'gender', '常住地址': 'address', '现住地址': 'currentAddress',
+    '工作单位': 'workCompany', '工作电话': 'workPhone', '紧急联系人': 'emergencyName',
+    '关系': 'emergencyRelation', '联系人电话': 'emergencyPhone',
+    '第二联系人': 'secondName', '第二联系人电话': 'secondPhone'
+  };
+
+  function parsedDate(value) {
+    let m = value.match(/^(\d{2})(\d{2})(\d{4})$/);
+    if (!m) m = value.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : value;
+  }
+
+  function parseSource() {
+    const text = pasteSource.trim();
+    if (!text) { U.toast('请先粘贴客户资料或 CCCD 二维码原文', 'err'); return; }
+    let count = 0;
+    const setValue = (key, value) => {
+      value = String(value || '').trim();
+      if (!value) return;
+      if (key === 'birthDate') value = parsedDate(value);
+      if (key === 'idType') value = /护照|passport/i.test(value) ? '护照' : (/CMND/i.test(value) ? 'CMND' : 'CCCD');
+      if (key === 'emergencyRelation') {
+        value = RELATIONS.find(r => r === value || r.split(' / ').indexOf(value) > -1) || value;
+      }
+      form.customer[key] = value;
+      count++;
+    };
+    text.split(/\r?\n/).forEach(line => {
+      const parts = line.split('|').map(x => x.trim());
+      if (parts.length === 7) {
+        setValue('idType', 'CCCD');
+        setValue('idNo', parts[0]);
+        setValue('name', parts[2]);
+        setValue('birthDate', parts[3]);
+        setValue('gender', parts[4]);
+        setValue('address', parts[5]);
+        return;
+      }
+      const separator = line.search(/[:：]/);
+      if (separator < 0) return;
+      const key = LABEL_KEYS[line.slice(0, separator).trim()];
+      if (key) setValue(key, line.slice(separator + 1));
+    });
+    if (!count) { U.toast('未识别到可填入的资料，请检查标签或 CCCD 7 段格式', 'err'); return; }
+    parseNotice = true;
+    step1();
+    U.toast(`已解析 ${count} 项并填入表单，请人工核对`);
+  }
+
+  function step1() {
+    const c = form.customer;
+    $('#content').innerHTML = `
+      <div class="m-card" style="padding:16px">
+        <div class="section-title">粘贴资料自动解析</div>
+        <div class="field"><textarea class="textarea" id="pasteSource" style="min-height:150px" placeholder="姓名：Nguyễn Văn A&#10;证件类型：CCCD&#10;证件号：031088001234&#10;手机号：0961920398&#10;出生日期：01011990&#10;性别：Nam&#10;常住地址：Thành phố Hà Nội&#10;现住地址：Quận Thanh Xuân&#10;工作单位：ABC Company&#10;工作电话：0901234567&#10;紧急联系人：Nguyễn Thị Lan&#10;关系：父母&#10;联系人电话：0974151359&#10;第二联系人：Nguyễn Văn B&#10;第二联系人电话：0912345678">${U.esc(pasteSource)}</textarea></div>
+        <button type="button" class="btn primary block" id="btnParse">解析并填入下方表单</button>
+        <div class="hint mt8">也支持 CCCD 二维码 7 段原文：证件号 | 旧CMND | 姓名 | ddMMyyyy出生 | 性别 | 常住地址 | ddMMyyyy签发。</div>
+        ${parseNotice ? '<div class="alert info mt12"><span>核对</span><span>资料仅已填入表单，请人工核对证件、联系方式及地址，确认无误后再继续。</span></div>' : ''}
+      </div>
+      <div class="m-card" style="padding:16px">
+        <div class="section-title">客户身份</div>
+        ${fieldHtml('客户姓名', 'cName', c.name, '与证件一致', 'text', true)}
+        <div class="field"><div class="label">证件类型</div>
+          <select class="select" id="cIdType">
+            ${['CCCD', 'CMND', '护照'].map(t => `<option value="${t}" ${c.idType === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select></div>
+        ${fieldHtml('证件号码', 'cId', c.idNo, 'CCCD / CMND / 护照号码', 'text', true)}
+        ${fieldHtml('联系电话', 'cPhone', c.phone, '越南手机号', 'tel', true)}
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:0 10px">
+          ${fieldHtml('出生日期', 'cBirth', c.birthDate, '', 'date')}
+          ${fieldHtml('性别', 'cGender', c.gender, '如 Nam / Nữ')}
+        </div>
+        <div class="field"><div class="label">常住地址<span class="req">*</span></div>
+          <textarea class="textarea" id="cAddr" placeholder="省 / 市 / 郡 / 坊 / 门牌号">${U.esc(c.address)}</textarea></div>
+        <div class="field"><div class="label">现住地址</div>
+          <textarea class="textarea" id="cCurrentAddr" placeholder="与常住地址不同时填写">${U.esc(c.currentAddress)}</textarea></div>
+        <div class="divider"></div>
+        <div class="section-title">工作信息（非必填）</div>
+        ${fieldHtml('工作单位', 'cWorkCompany', c.workCompany, '公司 / 店铺 / 单位名称')}
+        ${fieldHtml('工作电话', 'cWorkPhone', c.workPhone, '单位联系电话', 'tel')}
+        <div class="divider"></div>
+        <div class="section-title">紧急联系人</div>
+        ${fieldHtml('联系人姓名', 'eName', c.emergencyName, '不允许填写客户本人', 'text', true)}
+        <div class="field"><div class="label">与客户关系<span class="req">*</span></div>
+          <select class="select" id="eRel">
+            <option value="">请选择</option>
+            ${RELATIONS.map(r => `<option value="${U.esc(r)}" ${c.emergencyRelation === r ? 'selected' : ''}>${U.esc(r)}</option>`).join('')}
+          </select></div>
+        ${fieldHtml('联系人电话', 'ePhone', c.emergencyPhone, '可接通的号码', 'tel', true)}
+        <div class="alert info"><span>提示</span><span>紧急联系人号码不能与客户本人号码相同，初审会做重复校验。</span></div>
+        <div class="divider"></div>
+        <div class="section-title">第二联系人（非必填）</div>
+        ${fieldHtml('第二联系人', 'cSecondName', c.secondName, '第二联系人姓名')}
+        ${fieldHtml('第二联系人电话', 'cSecondPhone', c.secondPhone, '可接通的号码', 'tel')}
+      </div>`;
+    const bind = (id, key, obj) => {
+      const el = $('#' + id);
+      el.addEventListener('input', () => { (obj || c)[key] = el.value; });
+      el.addEventListener('change', () => { (obj || c)[key] = el.value; });
+    };
+    bind('cName', 'name'); bind('cIdType', 'idType'); bind('cId', 'idNo'); bind('cPhone', 'phone');
+    bind('cBirth', 'birthDate'); bind('cGender', 'gender'); bind('cAddr', 'address'); bind('cCurrentAddr', 'currentAddress');
+    bind('cWorkCompany', 'workCompany'); bind('cWorkPhone', 'workPhone');
+    bind('eName', 'emergencyName'); bind('eRel', 'emergencyRelation'); bind('ePhone', 'emergencyPhone');
+    bind('cSecondName', 'secondName'); bind('cSecondPhone', 'secondPhone');
+    $('#pasteSource').addEventListener('input', e => { pasteSource = e.target.value; });
+    $('#btnParse').addEventListener('click', parseSource);
+  }
+
+  function step2() {
+    const tiles = MOCK.DOC_TYPES.map(t => {
+      const done = form.docs[t.key];
+      return `<div class="upload-tile ${done ? 'done' : ''}" data-doc="${t.key}">
+        <div class="plus">${done ? '✓' : '+'}</div>
+        <div>${t.label}${t.required ? ' *' : ''}</div>
+        <div class="small" style="font-size:10px;color:${done ? '#067A54' : '#A9B4C6'}">${done ? '已上传' : '拍照 / 相册'}</div>
+      </div>`;
+    }).join('');
+    const required = MOCK.DOC_TYPES.filter(t => t.required);
+    const have = required.filter(t => form.docs[t.key]).length;
+    $('#content').innerHTML = `
+      <div class="m-card">
+        <div class="row-between mb12">
+          <div class="section-title" style="margin:0">资料采集</div>
+          <span class="pill ${have >= required.length ? 'green' : 'amber'}">${have} / ${required.length} 项必传</span>
+        </div>
+        <div class="upload-grid">${tiles}</div>
+        <div class="alert warn mt12"><span>必传</span><span>身份证正反面、手持照、工作证明、银行流水、合影、手机实名、串码、住址照片为初审必查项；紧急联系人通讯录与其他资料可后补。</span></div>
+      </div>
+      <div class="m-card">
+        <div class="section-title">拍摄要点</div>
+        <div class="small muted" style="line-height:1.9">
+          · 身份证四角完整、无反光、文字清晰<br>
+          · 手持照需人脸与证件同框，不遮挡<br>
+          · 工作证明需有单位盖章或负责人签字<br>
+          · 银行流水需近 3 个月，能看到工资入账<br>
+          · 串码图拍开机界面 *＃06＃，与录入 IMEI 一致<br>
+          · 住址照片至少 2 张，含门牌与楼栋
+        </div>
+      </div>`;
+    document.querySelectorAll('[data-doc]').forEach(el => el.addEventListener('click', () => {
+      const k = el.dataset.doc;
+      if (form.docs[k]) delete form.docs[k];
+      else {
+        const label = MOCK.DOC_TYPES.find(d => d.key === k).label;
+        form.docs[k] = { name: label.replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '') + '_' + Date.now().toString().slice(-6) + '.jpg', at: API.now() };
+        U.toast('已添加：' + label);
+      }
+      step2();
+    }));
+  }
+
+  function step3() {
+    const d = form.device;
+    const checks = [
+      ['screen', '屏幕正常，无烧屏'], ['battery', '电池健康 ≥ 85%'], ['camera', '前后摄像头正常'],
+      ['faceid', 'Face ID / 指纹正常'], ['icloud', 'Apple ID 已退出，查找我的 iPhone 已关闭'],
+      ['mdm', '无监管锁（MDM）'], ['sim', '无 SIM / 运营商锁']
+    ];
+    $('#content').innerHTML = `
+      <div class="m-card">
+        <div class="section-title">设备信息</div>
+        <div class="field"><div class="label">机型<span class="req">*</span></div>
+          <select class="select" id="dModel"><option value="">请选择机型</option>
+          ${MODELS.map(m => `<option ${d.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:0 10px">
+          <div class="field"><div class="label">容量</div>
+            <select class="select" id="dCap">${CAPS.map(c => `<option ${d.capacity === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+          <div class="field"><div class="label">颜色</div>
+            <input class="input" id="dColor" value="${U.esc(d.color)}" placeholder="如 Đen / Trắng"></div>
+        </div>
+        ${fieldHtml('卡槽 1 IMEI', 'dImei', d.imei, '15 位数字', 'text', true)}
+      </div>
+      <div class="m-card">
+        <div class="section-title">验机问卷（全部非必填）</div>
+        <div class="checklist">
+          ${checks.map(x => `<label class="check ${d.checks[x[0]] !== false ? 'on' : 'blocked'}">
+            <input type="checkbox" data-chk="${x[0]}" ${d.checks[x[0]] !== false ? 'checked' : ''}>
+            <div><div class="k">${x[1]}</div></div></label>`).join('')}
+        </div>
+        <div class="alert info mt12"><span>记录</span><span>验机项仅记录检测结果，不阻断下一步；异常项请如实取消勾选。MDM 序列号由初审在审核阶段绑定。</span></div>
+      </div>`;
+    $('#dModel').addEventListener('change', e => { d.model = e.target.value; });
+    $('#dCap').addEventListener('change', e => { d.capacity = e.target.value; });
+    $('#dColor').addEventListener('input', e => { d.color = e.target.value; });
+    $('#dImei').addEventListener('input', e => { d.imei = e.target.value; });
+    document.querySelectorAll('[data-chk]').forEach(el => el.addEventListener('change', () => {
+      d.checks[el.dataset.chk] = el.checked;
+      el.closest('.check').classList.toggle('on', el.checked);
+      el.closest('.check').classList.toggle('blocked', !el.checked);
+    }));
+  }
+
+  function step4() {
+    const p = form.plan;
+    $('#content').innerHTML = `
+      <div class="m-card">
+        <div class="section-title">商品与分期</div>
+        ${fieldHtml('商品售价（₫）', 'pPrice', p.price, '如 8500000', 'number', true)}
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:0 10px">
+          <div class="field"><div class="label">首付款（₫）</div>
+            <input class="input" id="pDown" type="number" value="${p.downPayment}"></div>
+          <div class="field"><div class="label">首期应还日</div>
+            <input class="input" id="pDate" type="date" value="${p.firstDueDate}"></div>
+        </div>
+        <div class="field" style="margin-bottom:0"><div class="label">期数</div>
+          <div class="radio-grid">
+            ${[3, 6, 9, 12].map(n => `<div class="radio-card ${Number(p.periods) === n ? 'on' : ''}" data-n="${n}">${n} 期</div>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="m-card">
+        <div class="section-title">方案试算</div>
+        <div id="calc"></div>
+        <div class="hint mt8">演示方案按 0 利率、等额本金计算；正式环境的费率与利息口径需业务确认后接入产品与费率配置。</div>
+      </div>
+      <div class="m-card">
+        <div class="section-title">归属信息</div>
+        <div class="field"><div class="label">门店<span class="req">*</span></div>
+          <select class="select" id="pStore">${ACTIVE_STORES.map(s => `<option value="${s.id}" ${p.storeId === s.id ? 'selected' : ''}>${U.esc(s.name)}</option>`).join('')}</select>
+          <div class="hint mt8">冻结门店不出现在可选列表，提交时录单 API 会再次拦截冻结门店。</div></div>
+        <div class="field" style="margin-bottom:0"><div class="label">业务员<span class="req">*</span></div>
+          <select class="select" id="pSales">${MOCK.SALES.map(s => `<option value="${s.id}" ${p.salesId === s.id ? 'selected' : ''}>${U.esc(s.name)}</option>`).join('')}</select></div>
+      </div>
+      <div class="m-card">
+        <div class="section-title">门店收款信息</div>
+        <div class="small muted mb12">放款时打给门店。选择门店会自动带出默认账号，可按门店实际要求修改；初审也可补录或更正。</div>
+        <div class="field"><div class="label">收款人姓名<span class="req">*</span></div>
+          <input class="input" id="yName" value="${U.esc(form.payee.name)}" placeholder="与银行开户名一致"></div>
+        <div class="field"><div class="label">收款账号<span class="req">*</span></div>
+          <input class="input" id="yAcc" value="${U.esc(form.payee.account)}" placeholder="银行账号 / 卡号"></div>
+        <div class="field"><div class="label">开户行</div>
+          <input class="input" id="yBank" value="${U.esc(form.payee.bank)}" placeholder="如 MB Bank / Vietcombank"></div>
+        <div class="upload-slot" id="yQr">${form.payee.qr ? '收款二维码已上传' : '上传收款二维码（点击模拟）'}</div>
+      </div>`;
+    const updateCalc = () => {
+      const pp = perPeriod();
+      $('#calc').innerHTML = `
+        <div class="fee-row"><span>商品售价</span><b>${U.currency(Number(p.price || 0))}</b></div>
+        <div class="fee-row"><span>首付款</span><b>- ${U.currency(Number(p.downPayment || 0))}</b></div>
+        <div class="fee-row"><span>分期额（售价 - 首付款）</span><b>${U.currency(Math.max(0, Number(p.price || 0) - Number(p.downPayment || 0)))}</b></div>
+        <div class="fee-row"><span>每期金额（${p.periods} 期）</span><b>${U.currency(pp)}</b></div>
+        <div class="fee-row total"><span>还款总额</span><b>${U.currency(pp * Number(p.periods))}</b></div>`;
+    };
+    updateCalc();
+    $('#pPrice').addEventListener('input', e => { p.price = e.target.value; updateCalc(); });
+    $('#pDown').addEventListener('input', e => { p.downPayment = e.target.value; updateCalc(); });
+    $('#pDate').addEventListener('change', e => { p.firstDueDate = e.target.value; });
+    $('#pStore').addEventListener('change', e => {
+      p.storeId = e.target.value;
+      const st = MOCK.STORES.find(x => x.id === p.storeId);
+      if (st && st.payee) {
+        form.payee = Object.assign({ qr: '' }, st.payee);
+        $('#yName').value = form.payee.name;
+        $('#yAcc').value = form.payee.account;
+        $('#yBank').value = form.payee.bank;
+        U.toast('已带入门店默认收款信息');
+      }
+    });
+    $('#pSales').addEventListener('change', e => { p.salesId = e.target.value; });
+    $('#yName').addEventListener('input', e => { form.payee.name = e.target.value; });
+    $('#yAcc').addEventListener('input', e => { form.payee.account = e.target.value; });
+    $('#yBank').addEventListener('input', e => { form.payee.bank = e.target.value; });
+    $('#yQr').addEventListener('click', () => {
+      form.payee.qr = 'QR_' + Date.now().toString().slice(-6) + '.png';
+      $('#yQr').textContent = '收款二维码已上传';
+      $('#yQr').classList.add('done');
+    });
+    document.querySelectorAll('[data-n]').forEach(el => el.addEventListener('click', () => {
+      p.periods = Number(el.dataset.n);
+      document.querySelectorAll('[data-n]').forEach(x => x.classList.toggle('on', x === el));
+      updateCalc();
+    }));
+  }
+
+  function step5() {
+    const c = form.customer, d = form.device, p = form.plan;
+    const store = MOCK.STORES.find(s => s.id === p.storeId);
+    const sales = MOCK.SALES.find(s => s.id === p.salesId);
+    $('#content').innerHTML = `
+      <div class="m-card">
+        <div class="section-title">请核对后提交</div>
+        <div class="kv" style="grid-template-columns:86px 1fr;gap:9px 10px;font-size:12.5px">
+          <div class="kv-k">客户</div><div class="kv-v">${U.esc(c.name)} · ${U.esc(c.phone)}</div>
+          <div class="kv-k">证件</div><div class="kv-v">${U.esc(c.idType)} · <span class="mono">${U.esc(c.idNo)}</span></div>
+          <div class="kv-k">出生 / 性别</div><div class="kv-v">${U.esc(c.birthDate || '—')} · ${U.esc(c.gender || '—')}</div>
+          <div class="kv-k">常住地址</div><div class="kv-v">${U.esc(c.address)}</div>
+          <div class="kv-k">现住地址</div><div class="kv-v">${U.esc(c.currentAddress || '—')}</div>
+          <div class="kv-k">工作信息</div><div class="kv-v">${U.esc(c.workCompany || '—')} · ${U.esc(c.workPhone || '—')}</div>
+          <div class="kv-k">紧急联系人</div><div class="kv-v">${U.esc(c.emergencyName)} · ${U.esc(c.emergencyRelation)} · ${U.esc(c.emergencyPhone)}</div>
+          <div class="kv-k">第二联系人</div><div class="kv-v">${U.esc(c.secondName || '—')} · ${U.esc(c.secondPhone || '—')}</div>
+          <div class="kv-k">设备</div><div class="kv-v">${U.esc(d.model)} ${U.esc(d.capacity)} ${U.esc(d.color)}</div>
+          <div class="kv-k">IMEI</div><div class="kv-v mono">${U.esc(d.imei)}</div>
+          <div class="kv-k">门店 / 业务员</div><div class="kv-v">${U.esc(store ? store.name : '')} · ${U.esc(sales ? sales.name : '')}</div>
+          <div class="kv-k">资料</div><div class="kv-v">${requiredDone()} 项必传已上传</div>
+          <div class="kv-k">收款信息</div><div class="kv-v">${U.esc(form.payee.name || '—')} · ${U.esc(form.payee.bank || '')}<br><span class="mono small">${U.esc(form.payee.account || '')}</span></div>
+        </div>
+        <div class="divider"></div>
+        <div class="fee-row"><span>商品售价</span><b>${U.currency(Number(p.price || 0))}</b></div>
+        <div class="fee-row"><span>首付款</span><b>${U.currency(Number(p.downPayment || 0))}</b></div>
+        <div class="fee-row"><span>分期额（售价 - 首付款）</span><b>${U.currency(Math.max(0, Number(p.price || 0) - Number(p.downPayment || 0)))}</b></div>
+        <div class="fee-row"><span>期数</span><b>${p.periods} 期</b></div>
+        <div class="fee-row"><span>每期金额</span><b>${U.currency(perPeriod())}</b></div>
+        <div class="fee-row total"><span>还款总额</span><b>${U.currency(perPeriod() * Number(p.periods))}</b></div>
+      </div>
+      <label class="check on" style="background:#fff;margin-top:2px">
+        <input type="checkbox" id="agree">
+        <div><div class="k">客户已阅读并同意分期服务协议</div><div class="d">提交后进入初审，资料齐全一般当天出结果</div></div>
+      </label>`;
+    $('#agree').checked = false;
+  }
+
+  function renderFoot() {
+    const back = step > 1 ? `<button class="btn" style="flex:0 0 96px" id="btnBack">上一步</button>` : '';
+    const next = step < 5 ? `<button class="btn primary" id="btnNext">下一步</button>`
+      : `<button class="btn primary" id="btnSubmit">提交初审</button>`;
+    $('#foot').innerHTML = back + next;
+    if (step > 1) $('#btnBack').addEventListener('click', () => { step--; render(); window.scrollTo(0, 0); });
+    if (step < 5) $('#btnNext').addEventListener('click', () => { if (validate()) { step++; render(); window.scrollTo(0, 0); } });
+    else $('#btnSubmit').addEventListener('click', submit);
+  }
+
+  function validate() {
+    const c = form.customer;
+    if (step === 1) {
+      if (!c.name.trim()) return err('请填写客户姓名');
+      if (c.idNo.replace(/\s/g, '').length < 9) return err('证件号码位数不足');
+      if (c.phone.replace(/\D/g, '').length < 9) return err('请填写正确的联系电话');
+      if (!c.address.trim()) return err('请填写常住地址');
+      if (!c.emergencyName.trim()) return err('请填写紧急联系人');
+      if (!c.emergencyRelation) return err('请选择与客户关系');
+      if (c.emergencyPhone.replace(/\D/g, '').length < 9) return err('请填写紧急联系人电话');
+      if (c.emergencyPhone === c.phone) return err('紧急联系人不能与客户本人号码相同');
+    }
+    if (step === 2) {
+      const miss = MOCK.DOC_TYPES.filter(t => t.required && !form.docs[t.key]);
+      if (miss.length) return err('还缺资料：' + miss.map(m => m.label).join('、'));
+    }
+    if (step === 3) {
+      if (!form.device.model) return err('请选择机型');
+      if (form.device.imei.replace(/\D/g, '').length < 10) return err('IMEI 位数不正确');
+    }
+    if (step === 4) {
+      const store = MOCK.STORES.find(s => s.id === form.plan.storeId);
+      if (!store) return err('请选择可录单门店');
+      if (store.status === '冻结') return err('所选门店已冻结，请更换门店');
+      if (!Number(form.plan.price)) return err('请填写商品售价');
+      if (Number(form.plan.downPayment) >= Number(form.plan.price)) return err('首付款不能大于等于售价');
+      if (!form.payee.name.trim()) return err('请填写门店收款人姓名');
+      if (!form.payee.account.trim()) return err('请填写门店收款账号');
+    }
+    if (step === 5 && !$('#agree').checked) return err('请勾选分期服务协议');
+    return true;
+  }
+  function err(msg) { U.toast(msg, 'err'); return false; }
+
+  let submitting = false;
+  async function submit() {
+    if (!validate() || submitting) return;
+    submitting = true;
+    const btn = $('#btnSubmit');
+    btn.textContent = '提交中…'; btn.disabled = true;
+    let o;
+    try {
+      o = await API.createOrder({
+        customer: Object.assign({}, form.customer),
+        docs: Object.assign({}, form.docs),
+        device: Object.assign({}, form.device),
+        plan: Object.assign({}, form.plan),
+        payee: Object.assign({}, form.payee)
+      });
+    } catch (e) {
+      submitting = false;
+      btn.textContent = '提交初审'; btn.disabled = false;
+      U.toast(e.message || '提交失败，请稍后重试', 'err');
+      return;
+    }
+    submitting = false;
+    document.querySelector('.m-body').innerHTML = `
+      <div class="m-card" style="text-align:center;padding:34px 20px;margin-top:20px">
+        <div class="ok-mark">✓</div>
+        <div style="font-size:16px;font-weight:650">提交成功</div>
+        <div class="small muted mt8">订单已进入初审队列，审核结果会同步到「我的订单」。</div>
+        <div class="mono mt16" style="font-size:13px">${U.esc(o.no)}</div>
+        <div class="row mt24" style="gap:10px">
+          <a class="btn grow" href="sales-orders.html">返回列表</a>
+          <a class="btn primary grow" href="sales-order-detail.html?id=${o.id}">查看订单</a>
+        </div>
+      </div>`;
+    document.getElementById('foot').innerHTML = '';
+    U.toast('录单已提交，待初审');
+  }
+
+  function render() { renderBar(); if (step === 1) step1(); else if (step === 2) step2(); else if (step === 3) step3(); else if (step === 4) step4(); else step5(); renderFoot(); }
+  render();
+})();
+</script>
+</body>
+</html>
