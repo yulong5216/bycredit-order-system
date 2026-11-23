@@ -39,7 +39,7 @@ const gate = computed(() => {
   if (!order.value.payee.account) list.push('门店收款信息缺失')
   return list
 })
-const logs = computed(() => [...(order.value.logs || [])].reverse())
+const logs = computed(() => order.value.logs || [])
 const paidPeriods = computed(() => order.value.bills.filter(b => ['Paid', 'Settled'].includes(b.status)).length)
 const storePayee = computed(() => order.value.store?.payee || {})
 const payeeMatchesStore = computed(() => {
@@ -297,19 +297,20 @@ onMounted(load)
               <template v-else><div class="section-title">操作日志 <span class="card-sub">共 {{ logs.length }} 条 · 只增不删</span></div><div v-if="logs.length" class="timeline"><div v-for="(log, i) in logs" :key="log.id || i" class="tl-item done"><div class="tl-title">{{ log.action }}</div><div class="tl-sub">{{ dateText(log.at || log.createdAt) }} · {{ log.by || log.operator || '系统' }} / {{ log.role || '—' }}</div><div v-if="log.before || log.after" class="tl-sub">{{ log.before || '—' }} → {{ log.after || '—' }}</div><div v-if="log.note" class="tl-sub">说明：{{ log.note }}</div></div></div><div v-else class="empty">暂无操作日志</div></template>
             </div></div>
 
-            <div class="card"><div class="card-head"><div class="card-title">流程进度 <span class="card-sub">初审 → 演示签约 → 终审 → 财务 → 放款</span></div><span class="tag">{{ order.status.startsWith('rejected') ? '已驳回' : '进行中' }}</span></div><div class="card-body"><div class="timeline">
-              <div class="tl-item" :class="flowClass(0)"><div class="tl-title">录单提交</div><div class="tl-sub">{{ dateText(order.submittedAt || order.createdAt) }}</div></div>
-              <div class="tl-item" :class="flowClass(1)"><div class="tl-title">初审</div><div class="tl-sub">{{ order.review.first ? `${order.review.first.by || '审核人'} · ${dateText(order.review.first.at)}` : '核对资料 / 演示签约 / MDM 登记' }}</div></div>
-              <div class="tl-item" :class="flowClass(2)"><div class="tl-title">演示签约</div><div class="tl-sub">{{ signed ? `演示成功 · ${dateText(order.esign.signedAt)}` : esignStatus || '未发起' }}</div></div>
-              <div class="tl-item" :class="flowClass(3)"><div class="tl-title">终审</div><div class="tl-sub">{{ order.review.final ? `${order.review.final.by || '审核人'} · ${dateText(order.review.final.at)}` : '等待终审核对' }}</div></div>
-              <div class="tl-item" :class="flowClass(4)"><div class="tl-title">财务审核</div><div class="tl-sub">{{ order.finance.by ? `${order.finance.by} · ${dateText(order.finance.at)}` : order.finance.status }}</div></div>
-              <div class="tl-item" :class="flowClass(5)"><div class="tl-title">放款</div><div class="tl-sub">{{ order.payout.at ? `${dateText(order.payout.at)} · ${order.payout.ref}` : '等待银行打款' }}</div></div>
-            </div></div></div>
-
-            <div class="card"><div class="card-head"><div class="card-title">跟进备注 <span class="card-sub">共 {{ notes.length }} 条 · 只增不删</span></div></div><div class="card-body">
-              <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px"><textarea v-model="noteInput" class="textarea" style="flex:1;min-height:60px;resize:vertical" placeholder="添加跟进备注，例如：已电话联系客户，明日补交流水"></textarea><button class="btn primary" style="height:38px;white-space:nowrap" :disabled="busy || !noteInput.trim()" @click="addNote">添加</button></div>
-              <div v-if="notes.length" class="timeline"><div v-for="(n, i) in notes" :key="n.id || i" class="tl-item done"><div class="tl-title">{{ n.note }}</div><div class="tl-sub">{{ n.by || n.operator || '系统' }} · {{ dateText(n.at || n.createdAt) }}</div></div></div>
-              <div v-else class="mini-note">暂无跟进备注</div>
+            <div class="card"><div class="card-head"><div class="card-title">流程进度 & 跟进备注 <span class="card-sub">共 {{ notes.length }} 条备注</span></div><span class="tag">{{ order.status.startsWith('rejected') ? '已驳回' : '进行中' }}</span></div><div class="card-body" style="display:flex;gap:24px">
+              <div style="flex:0 0 45%"><div class="section-title-sm">进度时间线</div><div class="timeline">
+                <div class="tl-item" :class="flowClass(0)"><div class="tl-title">录单提交</div><div class="tl-sub">{{ dateText(order.submittedAt || order.createdAt) }}</div></div>
+                <div class="tl-item" :class="flowClass(1)"><div class="tl-title">初审</div><div class="tl-sub">{{ order.review.first ? `${order.review.first.by || '审核人'} · ${dateText(order.review.first.at)}` : '核对资料 / 演示签约 / MDM 登记' }}</div></div>
+                <div class="tl-item" :class="flowClass(2)"><div class="tl-title">签约</div><div class="tl-sub">{{ signed ? `成功 · ${dateText(order.esign.signedAt)}` : esignStatus || '未发起' }}</div></div>
+                <div class="tl-item" :class="flowClass(3)"><div class="tl-title">终审</div><div class="tl-sub">{{ order.review.final ? `${order.review.final.by || '审核人'} · ${dateText(order.review.final.at)}` : '等待终审核对' }}</div></div>
+                <div class="tl-item" :class="flowClass(4)"><div class="tl-title">财务审核</div><div class="tl-sub">{{ order.finance.by ? `${order.finance.by} · ${dateText(order.finance.at)}` : order.finance.status }}</div></div>
+                <div class="tl-item" :class="flowClass(5)"><div class="tl-title">放款</div><div class="tl-sub">{{ order.payout.at ? `${dateText(order.payout.at)} · ${order.payout.ref}` : '等待银行打款' }}</div></div>
+              </div></div>
+              <div style="flex:1;min-width:0"><div class="section-title-sm">跟进备注</div>
+                <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px"><textarea v-model="noteInput" class="textarea" style="flex:1;min-height:48px;resize:vertical" placeholder="例如：已电话联系客户，明日补交流水"></textarea><button class="btn primary" style="height:38px;white-space:nowrap" :disabled="busy || !noteInput.trim()" @click="addNote">添加</button></div>
+                <div v-if="notes.length" class="timeline" style="max-height:280px;overflow-y:auto"><div v-for="(n, i) in notes" :key="n.id || i" class="tl-item done"><div class="tl-title" style="font-size:13px;font-weight:400;line-height:1.5">{{ n.note }}</div><div class="tl-sub">{{ n.by || n.operator || '系统' }} · {{ dateText(n.at || n.createdAt) }}</div></div></div>
+                <div v-else class="mini-note">暂无跟进备注</div>
+              </div>
             </div></div>
           </div>
 

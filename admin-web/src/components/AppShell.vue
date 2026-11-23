@@ -21,6 +21,18 @@ const allNav = computed(() => [
   { key: 'teams', label: '团队管理', to: '/teams', show: auth.can('manageStores') },
   { key: 'users', label: '员工管理', to: '/users', show: auth.can('manageStores') }
 ])
+const activeNav = computed(() => {
+  const p = route.path
+  if (p.startsWith('/orders/new')) return 'new'
+  if (p.startsWith('/orders')) return 'orders'
+  if (p.startsWith('/finance')) return 'finance'
+  if (p.startsWith('/bills')) return 'bills'
+  if (p.startsWith('/customers')) return 'customers'
+  if (p.startsWith('/stores')) return 'stores'
+  if (p.startsWith('/teams')) return 'teams'
+  if (p.startsWith('/users')) return 'users'
+  return props.nav || ''
+})
 const crumb = computed(() => props.group || route.meta.group || '业务办理')
 
 function logout() {
@@ -44,7 +56,7 @@ onUnmounted(() => window.removeEventListener('auth-expired', expired))
       <nav class="nav">
         <template v-for="(item, index) in allNav" :key="item.group || item.key">
           <div v-if="item.group" class="nav-label">{{ item.group }}</div>
-          <RouterLink v-else-if="item.show !== false" class="nav-item" :class="{ active: nav === item.key }" :to="item.to">
+          <RouterLink v-else-if="item.show !== false" class="nav-item" :class="{ active: activeNav === item.key }" :to="item.to">
             {{ item.label }}
           </RouterLink>
           <span v-else :key="`hidden-${index}`" class="hide" />

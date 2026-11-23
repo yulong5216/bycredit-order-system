@@ -180,6 +180,7 @@ table.table{width:100%;border-collapse:collapse;font-size:13px}
 .kv.two{grid-template-columns:96px 1fr 96px 1fr}
 .section-title{font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .section-title::before{content:"";width:3px;height:13px;border-radius:2px;background:var(--primary)}
+.section-title-sm{font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
 .money-row{display:flex;justify-content:space-between;padding:8px 0;font-size:13px;border-bottom:1px dashed #EDF0F6}
 .money-row:last-child{border-bottom:0}
 .money-row b{font-variant-numeric:tabular-nums}
