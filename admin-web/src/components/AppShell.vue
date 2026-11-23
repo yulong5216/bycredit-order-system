@@ -17,7 +17,9 @@ const allNav = computed(() => [
   { group: '资料与合同' },
   { key: 'customers', label: '客户档案', to: '/customers', show: auth.can('viewCustomers') },
   { group: '运营与系统' },
-  { key: 'stores', label: '门店管理', to: '/stores' }
+  { key: 'stores', label: '门店管理', to: '/stores' },
+  { key: 'teams', label: '团队管理', to: '/teams', show: auth.can('manageStores') },
+  { key: 'users', label: '员工管理', to: '/users', show: auth.can('manageStores') }
 ])
 const crumb = computed(() => props.group || route.meta.group || '业务办理')
 

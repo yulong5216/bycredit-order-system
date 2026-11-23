@@ -29,6 +29,7 @@ const esignStatus = computed(() => ({ not_started: '未发起', pending: '等待
 const canStartEsign = computed(() => auth.can('reviewFirst') && ['pending_first', 'rejected_first'].includes(order.value.status) && !signed.value)
 const canSimulateEsign = computed(() => auth.can('reviewFirst') && order.value.status === 'pending_customer_sign')
 const canEditMdm = computed(() => auth.can('reviewFirst') && ['pending_first', 'rejected_first', 'pending_customer_sign', 'pending_final'].includes(order.value.status))
+const canEditCustomer = computed(() => auth.can('updateOrder') && ['draft', 'pending_first', 'rejected_first', 'pending_customer_sign'].includes(order.value.status))
 const canUploadDocs = computed(() => auth.can('updateOrder') && !order.value.payout.at && !['repaying', 'overdue', 'breach', 'closed', 'cancelled'].includes(order.value.status))
 const uploadedDocs = computed(() => DOC_TYPES.filter(d => order.value.docs[d.key]?.storageName).length)
 const gate = computed(() => {
@@ -227,7 +228,7 @@ onMounted(load)
           <div class="stack">
             <div class="card"><div class="tabs-wrap"><div class="tabs"><button v-for="t in tabs" :key="t[0]" class="tab" :class="{ active: tab === t[0] }" style="border-top:0;border-left:0;border-right:0;background:transparent" @click="tab = t[0]">{{ t[1] }}</button></div></div><div class="card-body">
               <template v-if="tab === 'profile'">
-                <div class="row-between mb12"><div class="section-title" style="margin:0">客户基本信息</div><button v-if="auth.can('reviewFirst')" class="btn sm" @click="openModal('profile')">二次编辑</button></div>
+                <div class="row-between mb12"><div class="section-title" style="margin:0">客户基本信息</div><button v-if="canEditCustomer" class="btn sm" @click="openModal('profile')">二次编辑</button></div>
                 <div class="kv two"><div class="kv-k">姓名</div><div class="kv-v">{{ order.customer.name }}</div><div class="kv-k">证件号码</div><div class="kv-v mono">{{ order.customer.idNo }}</div><div class="kv-k">手机号</div><div class="kv-v">{{ order.customer.phone }}</div><div class="kv-k">证件类型</div><div class="kv-v">{{ order.customer.idType || 'CCCD' }}</div><div class="kv-k">常居住址</div><div class="kv-v">{{ order.customer.address }}</div><div class="kv-k">出生 / 性别</div><div class="kv-v">{{ order.customer.birthDate || '—' }} · {{ order.customer.gender || '—' }}</div><div class="kv-k">紧急联系人</div><div class="kv-v">{{ order.customer.emergencyName }} · {{ order.customer.emergencyRelation }}</div><div class="kv-k">紧急联系电话</div><div class="kv-v">{{ order.customer.emergencyPhone }}</div><div class="kv-k">门店</div><div class="kv-v">{{ order.plan.storeName || order.store.name }}</div><div class="kv-k">录入来源</div><div class="kv-v">{{ order.source || '业务员录单' }}</div></div>
               </template>
 

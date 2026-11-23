@@ -85,6 +85,15 @@ export const api = {
   downloadStorePayeeQr: id => http.get(`/api/stores/${id}/payee-qr/content`, { responseType: 'blob' }),
   rateStore: (id, data) => http.post(`/api/stores/${id}/rating`, data),
   storeStatus: (id, data) => http.post(`/api/stores/${id}/status`, data),
+
+  listTeams: () => http.get('/api/teams'),
+  createTeam: data => http.post('/api/teams', data),
+  updateTeam: (id, data) => http.patch(`/api/teams/${id}`, data),
+
+  listUsers: (params = {}) => http.get('/api/users', { params }),
+  createUser: data => http.post('/api/users', data),
+  updateUser: (id, data) => http.patch(`/api/users/${id}`, data),
+  resetUserPassword: (id, data) => http.post(`/api/users/${id}/reset-password`, data),
   listCustomers: (params = {}) => http.get('/api/customers', { params }),
   orderLogs: id => http.get(`/api/logs/order/${id}`)
 }

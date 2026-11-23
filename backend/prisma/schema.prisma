@@ -7,12 +7,26 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Team {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(80)
+  manager   String?  @db.VarChar(100)
+  city      String   @default("") @db.VarChar(80)
+  active    Boolean  @default(true)
+  remark    String   @default(dbgenerated("('')")) @db.Text
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model User {
   id           String     @id @default(cuid())
   username     String     @unique @db.VarChar(64)
   passwordHash String
   name         String     @db.VarChar(100)
   role         String     @db.VarChar(32)
+  teamId       String?
+  team         Team?      @relation(fields: [teamId], references: [id], onDelete: SetNull)
   storeId      String?
   store        Store?     @relation(fields: [storeId], references: [id], onDelete: SetNull)
   active       Boolean    @default(true)

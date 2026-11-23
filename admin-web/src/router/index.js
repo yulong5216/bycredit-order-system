@@ -10,6 +10,8 @@ const routes = [
   { path: '/bills', name: 'bills', component: () => import('../views/BillsView.vue'), meta: { title: '账单管理', group: '业务办理', permission: 'viewBills' } },
   { path: '/finance', name: 'finance', component: () => import('../views/FinanceView.vue'), meta: { title: '财务审核', group: '财务', permission: 'finance' } },
   { path: '/stores', name: 'stores', component: () => import('../views/StoresView.vue'), meta: { title: '门店管理', group: '运营与系统' } },
+  { path: '/teams', name: 'teams', component: () => import('../views/TeamsView.vue'), meta: { title: '团队管理', group: '运营与系统', permission: 'manageStores' } },
+  { path: '/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '员工管理', group: '运营与系统', permission: 'manageStores' } },
   { path: '/customers', name: 'customers', component: () => import('../views/CustomersView.vue'), meta: { title: '客户档案', group: '资料与合同', permission: 'viewCustomers' } },
   { path: '/customer', name: 'customer', component: () => import('../views/CustomerView.vue'), meta: { public: true } },
   { path: '/:pathMatch(.*)*', redirect: '/orders' }

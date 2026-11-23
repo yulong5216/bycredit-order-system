@@ -21,6 +21,8 @@ async function buildApp(options = {}) {
   await app.register(require('./routes/payments'));
   await app.register(require('./routes/finance'));
   await app.register(require('./routes/stores'));
+  await app.register(require('./routes/teams'));
+  await app.register(require('./routes/users'));
   await app.register(require('./routes/customers'));
   await app.register(require('./routes/logs'));
 

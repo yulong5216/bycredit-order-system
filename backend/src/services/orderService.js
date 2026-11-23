@@ -176,6 +176,10 @@ async function updateOrder(prisma, actor, id, payload) {
   return transaction(prisma, async tx => {
     const order = await findOrder(tx, id, { customer: true });
     assertOrderAccess(order, actor);
+    // 用户明确要求：初审通过后不可再编辑客户资料
+    // 允许编辑客户资料的状态: draft / pending_first / rejected_first / pending_customer_sign
+    const editableStates = ['draft', ...PRE_FIRST_REVIEW_STATUSES];
+    assert(editableStates.includes(order.status), 409, 'INVALID_STATE', '初审后不可再编辑客户资料，如需修改请走备注或联系终审/管理员');
     assert(!ACTIVE_ORDER_STATUSES.includes(order.status) && order.status !== ORDER_STATUS.CANCELLED, 409, 'INVALID_STATE', '放款或取消后不可修改订单资料');
     const before = {};
     const after = {};

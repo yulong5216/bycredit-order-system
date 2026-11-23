@@ -26,7 +26,8 @@ export const useAuthStore = defineStore('auth', () => {
   const displayName = computed(() => user.value?.name || user.value?.displayName || user.value?.username || '用户')
 
   function can(permission) {
-    if (role.value === 'admin') return true
+    // admin 默认有大部分权限，但 createOrder 仅限业务员（admin 不做录单，放小程序）
+    if (role.value === 'admin') return permission !== 'createOrder'
     return (PERMISSIONS[permission] || []).includes(role.value)
   }
 
