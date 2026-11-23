@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  username     String     @unique @db.VarChar(64)
+  passwordHash String
+  name         String     @db.VarChar(100)
+  role         String     @db.VarChar(32)
+  storeId      String?
+  store        Store?     @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  orders       Order[]    @relation("SalesOrders")
+  logs         AuditLog[]
+}
+
+model Store {
+  id        String     @id @default(cuid())
+  code      String     @unique @db.VarChar(32)
+  name      String     @db.VarChar(160)
+  city      String     @default("") @db.VarChar(80)
+  type      String     @default("partner") @db.VarChar(32)
+  status    String     @default("active") @db.VarChar(32)
+  rating    String     @default("A") @db.Char(1)
+  address   String     @default("") @db.VarChar(500)
+  contact   String     @default("") @db.VarChar(100)
+  phone     String     @default("") @db.VarChar(32)
+  agreement String     @default("pending") @db.VarChar(32)
+  payee     Json
+  users     User[]
+  orders    Order[]
+  logs      AuditLog[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Customer {
+  id                String   @id @default(cuid())
+  name              String   @db.VarChar(100)
+  idType            String   @default("CCCD") @db.VarChar(32)
+  idNo              String   @db.VarChar(64)
+  phone             String   @db.VarChar(32)
+  birthDate         String   @default("") @db.VarChar(10)
+  gender            String   @default("") @db.VarChar(16)
+  address           String   @db.VarChar(500)
+  currentAddress    String   @default("") @db.VarChar(500)
+  workCompany       String   @default("") @db.VarChar(200)
+  workPhone         String   @default("") @db.VarChar(32)
+  emergencyName     String   @db.VarChar(100)
+  emergencyRelation String   @db.VarChar(64)
+  emergencyPhone    String   @db.VarChar(32)
+  secondName        String   @default("") @db.VarChar(100)
+  secondPhone       String   @default("") @db.VarChar(32)
+  order             Order?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([idNo])
+  @@index([phone])
+}
+
+model Order {
+  id            String           @id @default(cuid())
+  orderNo       String           @unique @db.VarChar(40)
+  status        String           @default("draft") @db.VarChar(40)
+  customerId    String           @unique
+  customer      Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  storeId       String
+  store         Store            @relation(fields: [storeId], references: [id])
+  salesId       String?
+  sales         User?            @relation("SalesOrders", fields: [salesId], references: [id], onDelete: SetNull)
+  salesName     String           @db.VarChar(100)
+  source        String           @default("sales") @db.VarChar(40)
+  urgent        Boolean          @default(false)
+  docs          Json
+  device        Json
+  checks        Json?
+  payee         Json
+  price         BigInt
+  downPayment   BigInt           @default(0)
+  principal     BigInt
+  periods       Int
+  rateBps       Int              @default(0)
+  perPeriod     BigInt
+  firstDueDate  DateTime         @db.Date
+  rejectReason  String           @default(dbgenerated("('')")) @db.Text
+  firstReview   Json?
+  finalReview   Json?
+  financeReview Json?
+  payoutAt      DateTime?
+  payoutRef     String?          @db.VarChar(128)
+  payoutBy      String?          @db.VarChar(100)
+  submittedAt   DateTime?
+  closedAt      DateTime?
+  cancelledAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  bills         Bill[]
+  payments      PaymentRequest[]
+  esignAttempts EsignAttempt[]
+  mdm           MdmRecord?
+  logs          AuditLog[]
+
+  @@index([status, createdAt])
+  @@index([storeId, status])
+  @@index([salesId, status])
+}
+
+model MdmRecord {
+  id          String    @id @default(cuid())
+  orderId     String    @unique
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  serial      String    @db.VarChar(128)
+  imei        String    @db.VarChar(64)
+  bound       Boolean   @default(true)
+  provider    String    @default("zhunfu_manual") @db.VarChar(40)
+  boundAt     DateTime  @default(now())
+  boundBy     String    @db.VarChar(100)
+  releasedAt  DateTime?
+  releasedBy  String?   @db.VarChar(100)
+  releaseNote String?   @db.Text
+  updatedAt   DateTime  @updatedAt
+}
+
+model Bill {
+  id         String           @id @default(cuid())
+  orderId    String
+  order      Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  period     Int
+  dueDate    DateTime         @db.Date
+  amount     BigInt
+  paidAmount BigInt           @default(0)
+  status     String           @default("Pending") @db.VarChar(24)
+  paidAt     DateTime?
+  channel    String?          @db.VarChar(40)
+  txnNo      String?          @db.VarChar(128)
+  note       String           @default(dbgenerated("('')")) @db.Text
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  payments   PaymentRequest[]
+
+  @@unique([orderId, period])
+  @@index([dueDate, status])
+  @@index([status, dueDate])
+}
+
+model PaymentRequest {
+  id            String    @id @default(cuid())
+  requestNo     String    @unique @db.VarChar(64)
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  billId        String
+  bill          Bill      @relation(fields: [billId], references: [id], onDelete: Cascade)
+  amount        BigInt
+  channel       String    @db.VarChar(40)
+  status        String    @default("pending") @db.VarChar(24)
+  provider      String    @db.VarChar(40)
+  externalTxnNo String?   @db.VarChar(128)
+  isMock        Boolean   @default(false)
+  paidAt        DateTime?
+  expiresAt     DateTime?
+  rawResponse   Json?
+  failureReason String    @default(dbgenerated("('')")) @db.Text
+  actorName     String    @default("系统") @db.VarChar(100)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([channel, externalTxnNo])
+  @@index([orderId, status])
+  @@index([billId, status])
+}
+
+model EsignAttempt {
+  id                 String    @id @default(cuid())
+  orderId            String
+  order              Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  attempt            Int
+  provider           String    @db.VarChar(40)
+  externalContractNo String?   @db.VarChar(128)
+  status             String    @default("pending") @db.VarChar(24)
+  providerStatus     String    @default("") @db.VarChar(80)
+  failureReason      String    @default(dbgenerated("('')")) @db.Text
+  pdfUrl             String?   @db.VarChar(1000)
+  rawCallback        Json?
+  isMock             Boolean   @default(false)
+  actorName          String    @db.VarChar(100)
+  createdAt          DateTime  @default(now())
+  completedAt        DateTime?
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([orderId, attempt])
+  @@index([orderId, status])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  storeId   String?
+  store     Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String   @db.VarChar(100)
+  actorRole String   @db.VarChar(32)
+  action    String   @db.VarChar(100)
+  before    Json?
+  after     Json?
+  note      String   @default(dbgenerated("('')")) @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([storeId, createdAt])
+}

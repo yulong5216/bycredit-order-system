@@ -18,3 +18,8 @@ yarn-error.log*
 # Env (never commit secrets)
 .env
 .env.*
+!.env.example
+
+# Generated application artifacts
+admin-web/dist/
+backend/uploads/
