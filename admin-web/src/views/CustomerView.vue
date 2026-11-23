@@ -198,7 +198,8 @@ onUnmounted(() => window.removeEventListener('auth-expired', expired))
         <button class="btn primary block" style="height:44px" :disabled="loginBusy">{{ loginBusy ? 'Đang đăng nhập…' : 'Đăng nhập' }}</button>
       </form>
       <div class="alert info mt16"><span>DEMO</span><span>Tính năng thanh toán chỉ là mô phỏng, không kết nối ngân hàng và không trừ tiền thật.</span></div>
-      <RouterLink class="btn ghost block mt12" to="/login">Dành cho nhân viên</RouterLink>
+      <div class="divider" style="margin:18px 0 12px"></div>
+      <RouterLink class="btn block" style="background:#1a2236;color:#fff;font-weight:600" to="/login">🔐 Dành cho nhân viên đăng nhập后台</RouterLink>
     </section>
   </div>
 
