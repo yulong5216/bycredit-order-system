@@ -16,7 +16,9 @@ const teams = ref([])
 const stores = ref([])
 const showModal = ref(false)
 const editing = ref(null)
-const roleList = ['admin', 'sales', 'first', 'final', 'finance', 'manager', 'store', 'collector', 'aftercare']
+const roleList = ['sales', 'first', 'final', 'finance', 'manager', 'store', 'collector', 'aftercare']
+// 用户明确要求：给员工开的固定账号就是业务员角色，只能录单+看自己订单
+// 这里保留 9 种是为了管理已有的审核/财务等角色，但新建员工默认就是 sales
 
 async function load() {
   loading.value = true
