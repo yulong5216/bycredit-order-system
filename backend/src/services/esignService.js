@@ -65,19 +65,9 @@ async function applyResult(prisma, actor, id, result) {
         completedAt: new Date()
       }
     });
-    let orderStatus = ORDER_STATUS.PENDING_FIRST;
+    // 用户明确要求：初审必须手动点击通过，签约成功后回到 pending_first 等待初审
+    const orderStatus = ORDER_STATUS.PENDING_FIRST;
     const data = { status: orderStatus, rejectReason: result.ok ? '' : result.failureReason };
-    if (result.ok && order.mdm && order.mdm.bound) {
-      orderStatus = ORDER_STATUS.PENDING_FINAL;
-      data.status = orderStatus;
-      data.firstReview = {
-        by: actor.name,
-        at: new Date().toISOString(),
-        result: 'pass',
-        note: '签约成功且 MDM 已绑定，自动流转终审',
-        automatic: true
-      };
-    }
     await tx.order.update({ where: { id: order.id }, data });
     await audit(tx, {
       orderId: order.id,

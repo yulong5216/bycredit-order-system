@@ -245,17 +245,10 @@ async function reviewFirst(prisma, actor, id, payload) {
   });
 }
 
+// 用户明确要求：初审必须手动点击通过才能流转到终审，不允许任何自动流转
+// 此函数保留但不再被调用，签名供未来需要时使用
 async function maybeAdvanceToFinal(tx, orderId, actor, note) {
-  const order = await tx.order.findUnique({
-    where: { id: orderId },
-    include: { mdm: true, esignAttempts: { orderBy: { attempt: 'desc' }, take: 1 } }
-  });
-  if (!order || order.status !== ORDER_STATUS.PENDING_FIRST) return null;
-  if (!order.mdm || !order.mdm.bound || !order.esignAttempts[0] || order.esignAttempts[0].status !== 'succeeded' || !order.payee.account) return null;
-  const firstReview = { by: actor.name, at: new Date().toISOString(), result: 'pass', note: note || '签约成功且 MDM 已绑定，自动流转终审', automatic: true };
-  await tx.order.update({ where: { id: order.id }, data: { status: ORDER_STATUS.PENDING_FINAL, firstReview, rejectReason: '' } });
-  await audit(tx, { orderId: order.id, storeId: order.storeId, actor, action: '初审条件齐备', before: order.status, after: ORDER_STATUS.PENDING_FINAL, note });
-  return ORDER_STATUS.PENDING_FINAL;
+  return null;
 }
 
 async function reviewFinal(prisma, actor, id, payload) {
