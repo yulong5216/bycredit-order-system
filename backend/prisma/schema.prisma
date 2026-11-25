@@ -3,17 +3,17 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
 model Team {
   id        String   @id @default(cuid())
-  name      String   
-  manager   String?  
-  city      String   @default("") 
+  name      String   @db.VarChar(80)
+  manager   String?  @db.VarChar(100)
+  city      String   @default("") @db.VarChar(80)
   active    Boolean  @default(true)
-  remark    String   @default(dbgenerated("('')")) 
+  remark    String   @default(dbgenerated("('')")) @db.Text
   users     User[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -21,10 +21,10 @@ model Team {
 
 model User {
   id           String     @id @default(cuid())
-  username     String     @unique 
+  username     String     @unique @db.VarChar(64)
   passwordHash String
-  name         String     
-  role         String     
+  name         String     @db.VarChar(100)
+  role         String     @db.VarChar(32)
   teamId       String?
   team         Team?      @relation(fields: [teamId], references: [id], onDelete: SetNull)
   storeId      String?
@@ -38,16 +38,16 @@ model User {
 
 model Store {
   id        String     @id @default(cuid())
-  code      String     @unique 
-  name      String     
-  city      String     @default("") 
-  type      String     @default("partner") 
-  status    String     @default("active") 
-  rating    String     @default("A") 
-  address   String     @default("") 
-  contact   String     @default("") 
-  phone     String     @default("") 
-  agreement String     @default("pending") 
+  code      String     @unique @db.VarChar(32)
+  name      String     @db.VarChar(160)
+  city      String     @default("") @db.VarChar(80)
+  type      String     @default("partner") @db.VarChar(32)
+  status    String     @default("active") @db.VarChar(32)
+  rating    String     @default("A") @db.Char(1)
+  address   String     @default("") @db.VarChar(500)
+  contact   String     @default("") @db.VarChar(100)
+  phone     String     @default("") @db.VarChar(32)
+  agreement String     @default("pending") @db.VarChar(32)
   payee     Json
   users     User[]
   orders    Order[]
@@ -58,21 +58,21 @@ model Store {
 
 model Customer {
   id                String   @id @default(cuid())
-  name              String   
-  idType            String   @default("CCCD") 
-  idNo              String   
-  phone             String   
-  birthDate         String   @default("") 
-  gender            String   @default("") 
-  address           String   
-  currentAddress    String   @default("") 
-  workCompany       String   @default("") 
-  workPhone         String   @default("") 
-  emergencyName     String   
-  emergencyRelation String   
-  emergencyPhone    String   
-  secondName        String   @default("") 
-  secondPhone       String   @default("") 
+  name              String   @db.VarChar(100)
+  idType            String   @default("CCCD") @db.VarChar(32)
+  idNo              String   @db.VarChar(64)
+  phone             String   @db.VarChar(32)
+  birthDate         String   @default("") @db.VarChar(10)
+  gender            String   @default("") @db.VarChar(16)
+  address           String   @db.VarChar(500)
+  currentAddress    String   @default("") @db.VarChar(500)
+  workCompany       String   @default("") @db.VarChar(200)
+  workPhone         String   @default("") @db.VarChar(32)
+  emergencyName     String   @db.VarChar(100)
+  emergencyRelation String   @db.VarChar(64)
+  emergencyPhone    String   @db.VarChar(32)
+  secondName        String   @default("") @db.VarChar(100)
+  secondPhone       String   @default("") @db.VarChar(32)
   order             Order?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -83,16 +83,16 @@ model Customer {
 
 model Order {
   id            String           @id @default(cuid())
-  orderNo       String           @unique 
-  status        String           @default("draft") 
+  orderNo       String           @unique @db.VarChar(40)
+  status        String           @default("draft") @db.VarChar(40)
   customerId    String           @unique
   customer      Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
   storeId       String
   store         Store            @relation(fields: [storeId], references: [id])
   salesId       String?
   sales         User?            @relation("SalesOrders", fields: [salesId], references: [id], onDelete: SetNull)
-  salesName     String           
-  source        String           @default("sales") 
+  salesName     String           @db.VarChar(100)
+  source        String           @default("sales") @db.VarChar(40)
   urgent        Boolean          @default(false)
   docs          Json
   device        Json
@@ -104,14 +104,14 @@ model Order {
   periods       Int
   rateBps       Int              @default(0)
   perPeriod     BigInt
-  firstDueDate  DateTime         
-  rejectReason  String           @default(dbgenerated("('')")) 
+  firstDueDate  DateTime         @db.Date
+  rejectReason  String           @default(dbgenerated("('')")) @db.Text
   firstReview   Json?
   finalReview   Json?
   financeReview Json?
   payoutAt      DateTime?
-  payoutRef     String?          
-  payoutBy      String?          
+  payoutRef     String?          @db.VarChar(128)
+  payoutBy      String?          @db.VarChar(100)
   submittedAt   DateTime?
   closedAt      DateTime?
   cancelledAt   DateTime?
@@ -132,15 +132,15 @@ model MdmRecord {
   id          String    @id @default(cuid())
   orderId     String    @unique
   order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  serial      String    
-  imei        String    
+  serial      String    @db.VarChar(128)
+  imei        String    @db.VarChar(64)
   bound       Boolean   @default(true)
-  provider    String    @default("zhunfu_manual") 
+  provider    String    @default("zhunfu_manual") @db.VarChar(40)
   boundAt     DateTime  @default(now())
-  boundBy     String    
+  boundBy     String    @db.VarChar(100)
   releasedAt  DateTime?
-  releasedBy  String?   
-  releaseNote String?   
+  releasedBy  String?   @db.VarChar(100)
+  releaseNote String?   @db.Text
   updatedAt   DateTime  @updatedAt
 }
 
@@ -149,14 +149,14 @@ model Bill {
   orderId    String
   order      Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   period     Int
-  dueDate    DateTime         
+  dueDate    DateTime         @db.Date
   amount     BigInt
   paidAmount BigInt           @default(0)
-  status     String           @default("Pending") 
+  status     String           @default("Pending") @db.VarChar(24)
   paidAt     DateTime?
-  channel    String?          
-  txnNo      String?          
-  note       String           @default(dbgenerated("('')")) 
+  channel    String?          @db.VarChar(40)
+  txnNo      String?          @db.VarChar(128)
+  note       String           @default(dbgenerated("('')")) @db.Text
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
   payments   PaymentRequest[]
@@ -168,22 +168,22 @@ model Bill {
 
 model PaymentRequest {
   id            String    @id @default(cuid())
-  requestNo     String    @unique 
+  requestNo     String    @unique @db.VarChar(64)
   orderId       String
   order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   billId        String
   bill          Bill      @relation(fields: [billId], references: [id], onDelete: Cascade)
   amount        BigInt
-  channel       String    
-  status        String    @default("pending") 
-  provider      String    
-  externalTxnNo String?   
+  channel       String    @db.VarChar(40)
+  status        String    @default("pending") @db.VarChar(24)
+  provider      String    @db.VarChar(40)
+  externalTxnNo String?   @db.VarChar(128)
   isMock        Boolean   @default(false)
   paidAt        DateTime?
   expiresAt     DateTime?
   rawResponse   Json?
-  failureReason String    @default(dbgenerated("('')")) 
-  actorName     String    @default("系统") 
+  failureReason String    @default(dbgenerated("('')")) @db.Text
+  actorName     String    @default("系统") @db.VarChar(100)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -197,15 +197,15 @@ model EsignAttempt {
   orderId            String
   order              Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   attempt            Int
-  provider           String    
-  externalContractNo String?   
-  status             String    @default("pending") 
-  providerStatus     String    @default("") 
-  failureReason      String    @default(dbgenerated("('')")) 
-  pdfUrl             String?   
+  provider           String    @db.VarChar(40)
+  externalContractNo String?   @db.VarChar(128)
+  status             String    @default("pending") @db.VarChar(24)
+  providerStatus     String    @default("") @db.VarChar(80)
+  failureReason      String    @default(dbgenerated("('')")) @db.Text
+  pdfUrl             String?   @db.VarChar(1000)
   rawCallback        Json?
   isMock             Boolean   @default(false)
-  actorName          String    
+  actorName          String    @db.VarChar(100)
   createdAt          DateTime  @default(now())
   completedAt        DateTime?
   updatedAt          DateTime  @updatedAt
@@ -222,12 +222,12 @@ model AuditLog {
   store     Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
   actorId   String?
   actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
-  actorName String   
-  actorRole String   
-  action    String   
+  actorName String   @db.VarChar(100)
+  actorRole String   @db.VarChar(32)
+  action    String   @db.VarChar(100)
   before    Json?
   after     Json?
-  note      String   @default(dbgenerated("('')")) 
+  note      String   @default(dbgenerated("('')")) @db.Text
   createdAt DateTime @default(now())
 
   @@index([orderId, createdAt])
