@@ -100,30 +100,53 @@ const storeName = id => stores.value.find(s => s.id === id)?.name || '-'
     </table>
     <AppPagination v-if="total > size" v-model:page="page" :total="total" :size="size" @change="load" />
 
-    <BaseModal v-if="showModal" title="员工信息" @close="showModal = false">
-      <form v-if="editing" class="form-grid">
-        <label>账号
-          <input v-model="editing.username" :disabled="!!editing.id" :placeholder="editing.id ? '' : '登录账号'" />
-        </label>
-        <label>姓名 <input v-model="editing.name" /></label>
-        <label>角色
-          <select v-model="editing.role">
-            <option v-for="r in roleList" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option>
-          </select>
-        </label>
-        <label>团队
-          <select v-model="editing.teamId"><option value="">不归属</option><option v-for="t in teams" :key="t.id" :value="t.id">{{ t.name }}</option></select>
-        </label>
-        <label>门店
-          <select v-model="editing.storeId"><option value="">不归属</option><option v-for="s in stores" :key="s.id" :value="s.id">{{ s.name }}</option></select>
-        </label>
-        <label v-if="!editing.id">初始密码 <input v-model="editing.password" /></label>
-        <label v-if="editing.id" class="checkbox"><input type="checkbox" v-model="editing.active" />启用</label>
+    <BaseModal v-if="showModal" :title="editing?.id ? '编辑员工' : '新建员工'" @close="showModal = false">
+      <form v-if="editing" @submit.prevent="submit">
+        <div class="form-grid">
+          <div class="field">
+            <label class="label">登录账号 <span class="req">*</span></label>
+            <input v-model="editing.username" class="input" :disabled="!!editing.id" :placeholder="editing.id ? '' : '英文/数字'" required />
+          </div>
+          <div class="field">
+            <label class="label">姓名 <span class="req">*</span></label>
+            <input v-model="editing.name" class="input" required />
+          </div>
+          <div class="field">
+            <label class="label">角色 <span class="req">*</span></label>
+            <select v-model="editing.role" class="select" required>
+              <option v-for="r in roleList" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label">归属团队</label>
+            <select v-model="editing.teamId" class="select"><option value="">不归属</option><option v-for="t in teams" :key="t.id" :value="t.id">{{ t.name }}</option></select>
+          </div>
+          <div class="field">
+            <label class="label">归属门店</label>
+            <select v-model="editing.storeId" class="select"><option value="">不归属</option><option v-for="s in stores" :key="s.id" :value="s.id">{{ s.name }}</option></select>
+          </div>
+          <div class="field" v-if="!editing.id">
+            <label class="label">初始密码</label>
+            <input v-model="editing.password" class="input" placeholder="默认 Default123!" />
+          </div>
+          <div class="field" v-else>
+            <label class="label">状态</label>
+            <label class="check-inline">
+              <input type="checkbox" v-model="editing.active" /> 启用
+            </label>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" type="button" @click="showModal = false">取消</button>
+          <button class="btn primary" type="submit">保存</button>
+        </div>
       </form>
-      <div class="modal-actions">
-        <button class="btn" @click="showModal = false">取消</button>
-        <button class="btn primary" @click="submit">保存</button>
-      </div>
     </BaseModal>
   </AppShell>
 </template>
+
+<style scoped>
+.check-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); font-weight: normal; cursor: pointer; height: 38px }
+.check-inline input { accent-color: var(--primary); width: 14px; height: 14px }
+.actions { display: flex; gap: 6px }
+</style>

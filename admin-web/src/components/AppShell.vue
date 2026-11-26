@@ -63,7 +63,7 @@ onUnmounted(() => window.removeEventListener('auth-expired', expired))
       <nav class="nav">
         <template v-for="(item, index) in allNav" :key="item.group || item.key">
           <div v-if="item.group" class="nav-label">{{ item.group }}</div>
-          <RouterLink v-else-if="item.show !== false" class="nav-item" :class="{ active: activeNav === item.key }" :to="item.to">
+          <RouterLink v-else-if="item.show !== false" class="nav-item" :class="{ active: activeNav === item.key }" :to="item.to" :active-class="''">
             {{ item.label }}
           </RouterLink>
           <span v-else :key="`hidden-${index}`" class="hide" />
