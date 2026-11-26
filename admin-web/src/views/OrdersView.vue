@@ -86,6 +86,10 @@ watch(() => filtered.value.length, () => {
   const pages = Math.max(1, Math.ceil(filtered.value.length / state.size))
   if (state.page > pages) state.page = pages
 })
+// 左侧导航切换 ?tab=xxx 时，OrdersView 不会重新 mount，必须 watch query 变化
+watch(() => route.query.tab, (val) => {
+  if (val) state.status = val
+})
 onMounted(() => {
   const stage = route.query.stage
   if (stage && groups[stage]) state.status = stage
