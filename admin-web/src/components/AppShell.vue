@@ -12,20 +12,29 @@ const allNav = computed(() => [
   { group: '业务办理' },
   { key: 'orders', label: '订单池', to: '/orders' },
   { key: 'new', label: '新建录单', to: '/orders/new', show: auth.can('createOrder') },
-  { key: 'finance', label: '财务审核', to: '/finance', show: auth.can('finance') },
+  { key: 'first', label: '待初审', to: '/orders?tab=first', show: auth.can('reviewFirst') },
+  { key: 'sign', label: '待客户签约', to: '/orders?tab=sign', show: auth.can('reviewFirst') },
+  { key: 'final', label: '待终审', to: '/orders?tab=final', show: auth.can('reviewFinal') || auth.role === 'admin' },
+  { key: 'finance', label: '财务审核', to: '/orders?tab=finance', show: auth.can('finance') || auth.role === 'admin' },
   { key: 'bills', label: '账单管理', to: '/bills', show: auth.can('viewBills') },
   { group: '资料与合同' },
-  { key: 'customers', label: '客户档案', to: '/customers', show: auth.can('viewCustomers') },
+  { key: 'customers', label: '客户档案', to: '/customers', show: auth.can('viewCustomers') || auth.role === 'admin' },
   { group: '运营与系统' },
-  { key: 'stores', label: '门店管理', to: '/stores' },
-  { key: 'teams', label: '团队管理', to: '/teams', show: auth.can('manageStores') },
-  { key: 'users', label: '员工管理', to: '/users', show: auth.can('manageStores') }
+  { key: 'stores', label: '门店管理', to: '/stores', show: auth.role === 'admin' },
+  { key: 'teams', label: '团队管理', to: '/teams', show: auth.role === 'admin' },
+  { key: 'users', label: '员工管理', to: '/users', show: auth.role === 'admin' }
 ])
 const activeNav = computed(() => {
   const p = route.path
+  const q = route.query.tab
   if (p.startsWith('/orders/new')) return 'new'
-  if (p.startsWith('/orders')) return 'orders'
-  if (p.startsWith('/finance')) return 'finance'
+  if (p.startsWith('/orders')) {
+    if (q === 'first') return 'first'
+    if (q === 'sign') return 'sign'
+    if (q === 'final') return 'final'
+    if (q === 'finance') return 'finance'
+    return 'orders'
+  }
   if (p.startsWith('/bills')) return 'bills'
   if (p.startsWith('/customers')) return 'customers'
   if (p.startsWith('/stores')) return 'stores'

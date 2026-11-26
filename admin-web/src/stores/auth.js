@@ -8,7 +8,8 @@ const ROLE_NAMES = {
 }
 
 const PERMISSIONS = {
-  createOrder: ['sales'], updateOrder: ['sales', 'manager', 'first'], reviewFirst: ['first'], reviewFinal: ['final'],
+  createOrder: ['sales'], updateOrder: ['sales', 'manager', 'first'],
+  reviewFirst: ['first'], reviewFinal: ['final'],
   finance: ['finance'], payBill: ['finance'], deferBill: ['finance'],
   breachBill: ['finance'], manageStores: [], editStore: ['manager'],
   viewBills: ['sales', 'manager', 'finance', 'aftercare', 'collector'],

@@ -17,7 +17,7 @@ const busy = ref(false)
 const all = ref([])
 const stores = ref([])
 const selected = ref(new Set())
-const state = reactive({ status: 'all', q: route.query.q || '', store: route.query.store || '', from: '', to: '', urgent: false, page: 1, size: 10 })
+const state = reactive({ status: route.query.tab || 'all', q: route.query.q || '', store: route.query.store || '', from: '', to: '', urgent: false, page: 1, size: 10 })
 
 const tabs = [
   ['all', '全部'], ['first', '待初审'], ['sign', '待客户签约'], ['final', '待终审'],

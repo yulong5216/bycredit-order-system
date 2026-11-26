@@ -18,9 +18,12 @@ const teams = ref([])
 const stores = ref([])
 const showModal = ref(false)
 const editing = ref(null)
-const roleList = ['sales', 'first', 'final', 'finance', 'manager', 'store', 'collector', 'aftercare']
-// 用户明确要求：给员工开的固定账号就是业务员角色，只能录单+看自己订单
-// 这里保留 9 种是为了管理已有的审核/财务等角色，但新建员工默认就是 sales
+
+const ROLE_LABELS = {
+  admin: '管理员', sales: '业务员', manager: '门店店长', first: '初审专员',
+  final: '终审专员', finance: '财务', aftercare: '贷后管理', collector: '催收专员', store: '门店账号'
+}
+const roleList = Object.keys(ROLE_LABELS).filter(r => r !== 'admin')
 
 async function load() {
   loading.value = true
@@ -82,7 +85,7 @@ const storeName = id => stores.value.find(s => s.id === id)?.name || '-'
         <tr v-for="u in list" :key="u.id">
           <td><b>{{ u.username }}</b></td>
           <td>{{ u.name }}</td>
-          <td><StatusPill :status="u.role" :label="u.role" /></td>
+          <td><StatusPill :status="u.role" :label="ROLE_LABELS[u.role] || u.role" /></td>
           <td>{{ teamName(u.teamId) }}</td>
           <td>{{ storeName(u.storeId) }}</td>
           <td><StatusPill :status="u.active ? 'active' : 'inactive'" :label="u.active ? '启用' : '停用'" /></td>
@@ -105,7 +108,7 @@ const storeName = id => stores.value.find(s => s.id === id)?.name || '-'
         <label>姓名 <input v-model="editing.name" /></label>
         <label>角色
           <select v-model="editing.role">
-            <option v-for="r in roleList" :key="r" :value="r">{{ r }}</option>
+            <option v-for="r in roleList" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option>
           </select>
         </label>
         <label>团队
