@@ -2,7 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 
 const prisma = new PrismaClient();
-const password = process.env.SEED_PASSWORD || 'Bycredit123!';
+const password = process.env.SEED_PASSWORD || 'qwe123';
 
 async function main() {
   // 团队（name 不是 unique，用 findFirst + create/update）
