@@ -1,11 +1,13 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import api from '../api'
+import { api } from '../api'
+import AppShell from '../components/AppShell.vue'
 import AppPagination from '../components/AppPagination.vue'
 import BaseModal from '../components/BaseModal.vue'
 import StatusPill from '../components/StatusPill.vue'
 import { useAuthStore } from '../stores/auth'
-import auth from '../stores/auth'
+
+const auth = useAuthStore()
 
 const list = ref([])
 const total = ref(0)

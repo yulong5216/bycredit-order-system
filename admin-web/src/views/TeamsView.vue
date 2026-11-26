@@ -1,9 +1,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api'
+import { api } from '../api'
 import AppShell from '../components/AppShell.vue'
 import BaseModal from '../components/BaseModal.vue'
-import auth from '../stores/auth'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
 
 const teams = ref([])
 const editing = ref(null)
