@@ -4,6 +4,8 @@
 // M2: 8 ~ 30 天           → 贷后管理
 // M3: > 30 天             → 贷后管理
 
+const { isPaid } = require('./repayment');
+
 function daysBetween(from, to = new Date()) {
   const a = new Date(from).setHours(0, 0, 0, 0);
   const b = new Date(to).setHours(0, 0, 0, 0);
@@ -12,7 +14,7 @@ function daysBetween(from, to = new Date()) {
 
 // 给某一期账单算分档
 function bucketForBill(bill, now = new Date()) {
-  if (!bill || bill.status === 'paid') return null;
+  if (!bill || isPaid(bill)) return null;
   if (!bill.dueDate) return null;
   const overdueDays = daysBetween(bill.dueDate, now);
   if (overdueDays === 0) return null;   // 当天不算逾期
