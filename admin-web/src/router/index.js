@@ -4,6 +4,15 @@ import { useAuthStore } from '../stores/auth'
 const routes = [
   { path: '/', redirect: '/orders' },
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
+
+  // 业务员专属
+  { path: '/sales/home', name: 'sales-home', component: () => import('../views/SalesHomeView.vue'), meta: { title: '业务员首页', role: 'sales' } },
+  { path: '/sales/my-orders', name: 'sales-my-orders', component: () => import('../views/SalesMyOrdersView.vue'), meta: { title: '我的订单', role: 'sales' } },
+
+  // 设置
+  { path: '/settings/password', name: 'password-change', component: () => import('../views/PasswordChangeView.vue'), meta: { title: '修改密码' } },
+
+  // 常规管理后台
   { path: '/orders', name: 'orders', component: () => import('../views/OrdersView.vue'), meta: { title: '订单池', group: '业务办理' } },
   { path: '/orders/new', name: 'new-order', component: () => import('../views/NewOrderView.vue'), meta: { title: '新建录单', permission: 'createOrder' } },
   { path: '/orders/:id', name: 'order-detail', component: () => import('../views/OrderDetailView.vue'), meta: { title: '订单详情', group: '业务办理' } },
@@ -30,9 +39,16 @@ router.beforeEach(async to => {
   if (!auth.user && !auth.ready) {
     try { await auth.fetchMe() } catch { auth.logout(); return { name: 'login' } }
   }
+  if (to.meta.role && auth.role !== to.meta.role) return { name: 'orders' }
   if (to.meta.permission && !auth.can(to.meta.permission)) return { name: 'orders' }
   document.title = `${to.meta.title || '订单管理'} · BY Credit`
   return true
 })
+
+// 登录后默认跳转：sales → /sales/home，其他 → /orders
+export function defaultRedirectForRole(role) {
+  if (role === 'sales') return '/sales/home'
+  return '/orders'
+}
 
 export default router

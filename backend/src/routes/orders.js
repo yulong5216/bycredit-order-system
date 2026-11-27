@@ -39,6 +39,7 @@ module.exports = async function orderRoutes(app) {
   app.post('/api/orders/:id/send-finance', { preHandler: permission('order:send-finance') }, async request => orderService.sendToFinance(app.prisma, request.user, request.params.id));
   app.post('/api/orders/:id/cancel', { preHandler: permission('order:cancel') }, async request => orderService.cancelOrder(app.prisma, request.user, request.params.id, request.body));
   app.post('/api/orders/:id/notes', { preHandler: permission('order:note') }, async request => orderService.addNote(app.prisma, request.user, request.params.id, request.body));
+  app.post('/api/orders/:id/contact-attempt', { preHandler: [app.authenticate] }, async request => orderService.contactAttempt(app.prisma, request.user, request.params.id, request.body));
   app.put('/api/orders/:id/plan', { preHandler: permission('order:plan') }, async request => orderService.updatePlan(app.prisma, request.user, request.params.id, request.body));
   app.put('/api/orders/:id/due-date', { preHandler: permission('order:plan') }, async request => orderService.changeDueDate(app.prisma, request.user, request.params.id, request.body));
   app.post('/api/orders/:id/mdm/bind', { preHandler: permission('mdm:bind') }, async request => mdmService.bind(app.prisma, request.user, request.params.id, request.body));

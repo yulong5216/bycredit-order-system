@@ -1,3 +1,5 @@
+const { bucketForOrder, hasM0 } = require('./overdue');
+
 function latestEsign(order) {
   const latest = order.esignAttempts && order.esignAttempts[0];
   return {
@@ -22,9 +24,12 @@ function toOrderDto(order, customerHistory = []) {
       mockPaidAmount: succeeded.filter(payment => payment.isMock).reduce((sum, payment) => sum + payment.amount, 0n)
     };
   });
+  const bucket = bucketForOrder({ ...order, bills });
   return {
     ...order,
     bills,
+    overdueBucket: bucket,         // null | 'M0' | 'M1' | 'M2' | 'M3'
+    hasM0: hasM0({ ...order, bills }),  // 是否有业务员待办
     plan: {
       storeId: order.storeId,
       storeName: order.store ? order.store.name : '',

@@ -53,6 +53,7 @@ export const api = {
   sendFinance: id => orderAction(id, 'send-finance'),
   cancelOrder: (id, note) => orderAction(id, 'cancel', { note }),
   addNote: (id, note) => orderAction(id, 'notes', { note }),
+  contactAttempt: (id, note) => orderAction(id, 'contact-attempt', { note }),
   updatePlan: (id, data) => http.put(`/api/orders/${id}/plan`, data),
   updateDueDate: (id, firstDueDate, note) => http.put(`/api/orders/${id}/due-date`, { firstDueDate, note }),
   bindMdm: (id, data) => http.post(`/api/orders/${id}/mdm/bind`, data),
@@ -94,6 +95,7 @@ export const api = {
   createUser: data => http.post('/api/users', data),
   updateUser: (id, data) => http.patch(`/api/users/${id}`, data),
   resetUserPassword: (id, data) => http.post(`/api/users/${id}/reset-password`, data),
+  changeMyPassword: (oldPassword, newPassword) => http.put('/api/users/me/password', { oldPassword, newPassword }),
   listCustomers: (params = {}) => http.get('/api/customers', { params }),
   orderLogs: id => http.get(`/api/logs/order/${id}`)
 }

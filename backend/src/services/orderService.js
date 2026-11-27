@@ -347,6 +347,27 @@ async function addNote(prisma, actor, id, payload) {
   });
 }
 
+// M0 催收联系：业务员对自己 M0 逾期订单写催收备注，标记已联系
+async function contactAttempt(prisma, actor, id, payload) {
+  return transaction(prisma, async tx => {
+    const order = await findOrder(tx, id, detailInclude);
+    assertOrderAccess(order, actor);
+    assert(actor.role === 'sales', 403, 'FORBIDDEN', '只有业务员可以提交催收联系');
+    assert(order.salesId === actor.sub, 403, 'FORBIDDEN', '只能联系自己的订单');
+    const note = text(payload.note, '催收备注');
+    await audit(tx, {
+      orderId: order.id,
+      storeId: order.storeId,
+      actor,
+      action: 'M0催收联系',
+      before: null,
+      after: null,
+      note
+    });
+    return getOrder(tx, actor, order.id);
+  });
+}
+
 module.exports = {
   detailInclude,
   transaction,
@@ -364,5 +385,6 @@ module.exports = {
   updatePlan,
   changeDueDate,
   cancelOrder,
-  addNote
+  addNote,
+  contactAttempt
 };

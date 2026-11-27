@@ -61,6 +61,21 @@ module.exports = async function userRoutes(app) {
     reply.send({ id: updated.id, name: updated.name, role: updated.role, teamName: updated.team?.name, storeName: updated.store?.name, active: updated.active });
   });
 
+  // 自己改密码（所有登录用户）
+  app.put('/api/users/me/password', { preHandler: [app.authenticate] }, async request => {
+    const actor = request.user;
+    const { oldPassword, newPassword } = request.body || {};
+    if (!oldPassword) throw new DomainError(400, 'VALIDATION_ERROR', '请输入当前密码');
+    if (!newPassword || newPassword.length < 6) throw new DomainError(400, 'VALIDATION_ERROR', '新密码至少 6 位');
+    const u = await app.prisma.user.findUnique({ where: { id: actor.sub } });
+    if (!u) throw new DomainError(404, 'NOT_FOUND', '账号不存在');
+    const ok = await bcrypt.compare(oldPassword, u.passwordHash);
+    if (!ok) throw new DomainError(400, 'INVALID_PASSWORD', '当前密码不正确');
+    const hash = await bcrypt.hash(newPassword, 12);
+    await app.prisma.user.update({ where: { id: actor.sub }, data: { passwordHash: hash } });
+    return { message: '密码已更新' };
+  });
+
   // 重置密码
   app.post('/api/users/:id/reset-password', { preHandler: requireAdmin }, async (request, reply) => {
     const u = await app.prisma.user.findUnique({ where: { id: request.params.id } });

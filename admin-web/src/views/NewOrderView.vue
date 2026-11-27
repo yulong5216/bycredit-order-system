@@ -60,11 +60,15 @@ function parseDevice(raw) {
   const source = String(raw || '').trim()
   const compact = source.toLowerCase().replace(/\d+\s*(?:gb|g)\b|1\s*tb/g, '').replace(/[\s\-_/]/g, '')
   const capacity = source.match(/(\d+)\s*(?:gb|g)\b/i) || source.match(/1\s*tb/i)
-  const match = compact.match(/iphone(\d{1,2})(promax|pro|plus|mini)?/)
+  // 先识别带 iPhone 前缀的
+  let match = compact.match(/iphone\s*(\d{1,2})(promax|pro|plus|mini)?/)
+  // 再识别不带 iPhone 的（如 "15pro"、"15 pro"、"iPhone 15 Pro" 中去掉 iPhone 后的部分）
+  if (!match) match = compact.match(/(\d{1,2})(promax|pro|plus|mini)?/)
   if (!match) return { model: source, capacity: '' }
   const suffix = { promax: 'Pro Max', pro: 'Pro', plus: 'Plus', mini: 'Mini' }[match[2]] || ''
+  const modelNum = match[0].toLowerCase().startsWith('iphone') ? match[1] : match[1]
   return {
-    model: `iPhone ${match[1]}${suffix ? ` ${suffix}` : ''}`,
+    model: `iPhone ${modelNum}${suffix ? ` ${suffix}` : ''}`,
     capacity: capacity ? (capacity[1] ? `${capacity[1]}G` : '1TB') : ''
   }
 }

@@ -16,7 +16,8 @@ async function submit() {
   try {
     await auth.login({ username: form.username.trim(), password: form.password })
     toast('登录成功')
-    router.replace(route.query.redirect || '/orders')
+    const fallback = auth.role === 'sales' ? '/sales/home' : '/orders'
+    router.replace(route.query.redirect || fallback)
   } catch (error) { toast(error.message, 'err') } finally { busy.value = false }
 }
 </script>
