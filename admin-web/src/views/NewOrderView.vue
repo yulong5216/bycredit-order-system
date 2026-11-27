@@ -18,7 +18,7 @@ const relations = ['Bố mẹ / 父母', 'Vợ / Chồng / 配偶', 'Anh chị e
 const form = reactive({
   customer: { name: '', idType: 'CCCD', idNo: '', phone: '', birthDate: '', gender: '', address: '', currentAddress: '', workCompany: '', workPhone: '', emergencyName: '', emergencyRelation: '', emergencyPhone: '', secondName: '', secondPhone: '' },
   docs: {},
-  device: { model: '', capacity: '128G', color: '', imei: '', checks: { screen: true, battery: true, camera: true, faceid: true, icloud: true, mdm: true, sim: true } },
+  device: { model: '', capacity: '128G', color: '', imei: '', screenType: 'original', checks: { mdm: true, sim: true, faceid: true } },
   plan: { price: '', perPeriod: '', periods: 6, firstDueDate: todayPlus(), storeId: '', salesId: auth.user?.id || '', salesName: auth.displayName },
   payee: { name: '', account: '', qrFile: null, qrUrl: '' }
 })
@@ -27,7 +27,7 @@ const currentStore = computed(() => stores.value.find(s => String(s.id) === Stri
 const docCount = computed(() => DOC_TYPES.filter(d => form.docs[d.key]).length)
 const totalRepay = computed(() => (Number(form.plan.perPeriod) || 0) * (Number(form.plan.periods) || 0))
 const profitTotal = computed(() => Math.max(0, totalRepay.value - (Number(form.plan.price) || 0)))
-const checks = [['screen', '屏幕正常，无烧屏'], ['battery', '电池健康 ≥ 85%'], ['camera', '前后摄像头正常'], ['faceid', 'Face ID / 指纹正常'], ['icloud', 'Apple ID 已退出'], ['mdm', '无监管锁（MDM）'], ['sim', '无 SIM / 运营商锁']]
+const checks = [['mdm', '无 MDM 监管锁'], ['sim', '无 SIM / 运营商锁'], ['faceid', 'Face ID / 指纹正常']]
 
 const LABELS = {
   客户名字: 'name', 客户姓名: 'name', 姓名: 'name', 名字: 'name',
@@ -197,7 +197,7 @@ function validate() {
   if (!form.device.model.trim()) return '请填写机型'
   if (form.device.imei.replace(/\D/g, '').length < 10) return '请填写正确 IMEI'
   if (!form.plan.storeId) return '请选择门店'
-  if (!Number(form.plan.price)) return '请填写放款金额'
+  if (!Number(form.plan.price)) return '请填写分期额'
   if (!Number(form.plan.periods)) return '请填写期数'
   if (!(Number(form.plan.perPeriod) > 0)) return '请填写每期还款额'
   if (!form.payee.name.trim() || !form.payee.account.trim()) return '请完整填写门店收款信息'
@@ -257,7 +257,7 @@ onMounted(loadStores)
         <div class="m-card" style="padding:16px">
           <div class="section-title">客户身份</div>
           <div class="field"><div class="label">客户姓名<span class="req">*</span></div><input v-model="form.customer.name" class="input" placeholder="与证件一致"></div>
-          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:0 10px"><div class="field"><div class="label">证件类型</div><select v-model="form.customer.idType" class="select"><option>CCCD</option><option>CMND</option><option>护照</option></select></div><div class="field"><div class="label">联系电话<span class="req">*</span></div><input v-model="form.customer.phone" class="input" type="tel" inputmode="numeric" placeholder="最多 11 位数字" @input="onDigits(form.customer, 'phone', 11, $event)"></div></div>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:0 10px"><div class="field"><div class="label">证件类型</div><div class="input" style="background:#f5f7fa;color:#666;cursor:not-allowed">CCCD</div></div><div class="field"><div class="label">联系电话<span class="req">*</span></div><input v-model="form.customer.phone" class="input" type="tel" inputmode="numeric" placeholder="最多 11 位数字" @input="onDigits(form.customer, 'phone', 11, $event)"></div></div>
           <div class="field"><div class="label">证件号码<span class="req">*</span></div><input v-model="form.customer.idNo" class="input mono" :inputmode="form.customer.idType === '护照' ? 'text' : 'numeric'" placeholder="CCCD 为 12 位数字" @input="onIdNo"></div>
           <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:0 10px"><div class="field"><div class="label">出生日期</div><input v-model="form.customer.birthDate" class="input" type="date"></div><div class="field"><div class="label">性别</div><input v-model="form.customer.gender" class="input" placeholder="Nam / Nữ"></div></div>
           <div class="field"><div class="label">常住地址<span class="req">*</span></div><textarea v-model="form.customer.address" class="textarea" placeholder="省 / 市 / 郡 / 坊 / 门牌号"></textarea></div>
@@ -280,30 +280,21 @@ onMounted(loadStores)
           <div class="field"><div class="label">卡槽 1 IMEI<span class="req">*</span></div><input v-model="form.device.imei" class="input mono" inputmode="numeric" placeholder="15 位数字" @paste="onImeiPaste"><div class="hint mt8">iPhone 拨号输入 *#06# 查看；如能复制结果可直接粘贴，粘贴内容会自动提取 15 位数字。</div></div>
           <div class="divider"></div>
           <div class="section-title">验机问卷</div>
+          <div class="field"><div class="label">屏幕类型<span class="req">*</span></div><div class="radio-grid"><button type="button" class="radio-card" :class="{ on: form.device.screenType === 'original' }" @click="form.device.screenType = 'original'">原装屏</button><button type="button" class="radio-card" :class="{ on: form.device.screenType === 'third_party' }" @click="form.device.screenType = 'third_party'">非原装屏</button></div></div>
           <div class="checklist"><label v-for="check in checks" :key="check[0]" class="check" :class="form.device.checks[check[0]] ? 'on' : 'blocked'"><input v-model="form.device.checks[check[0]]" type="checkbox"><div><div class="k">{{ check[1] }}</div></div></label></div>
-          <div class="alert info mt12">验机项仅记录检测结果。MDM 序列号由初审在准富后台操作后登记。</div>
         </div>
 
         <div class="m-card">
           <div class="section-title">分期方案</div>
-          <div class="field"><div class="label">放款金额（₫）<span class="req">*</span></div><input v-model="form.plan.price" class="input" type="number" min="0" step="1" placeholder="如 8300000"><div class="hint mt8">即群消息里的「分期」，是我方放款给门店的金额。</div></div>
-          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:0 10px"><div class="field"><div class="label">首期应还日</div><input v-model="form.plan.firstDueDate" class="input" type="date"></div><div class="field"><div class="label">每期还款额（₫）<span class="req">*</span></div><input v-model="form.plan.perPeriod" class="input" type="number" min="0" step="1" placeholder="如 3306167"></div></div>
-          <div class="field"><div class="label">期数</div><div class="radio-grid"><button v-for="n in [3,6,9,12]" :key="n" type="button" class="radio-card" :class="{ on: Number(form.plan.periods) === n }" @click="form.plan.periods = n">{{ n }} 期</button></div></div>
-        </div>
-
-        <div class="m-card">
-          <div class="section-title">方案试算</div>
-          <div class="fee-row"><span>放款金额</span><b>{{ money(form.plan.price) }}</b></div>
-          <div class="fee-row"><span>每期还款额（{{ form.plan.periods }} 期）</span><b>{{ money(form.plan.perPeriod) }}</b></div>
-          <div class="fee-row"><span>利息合计</span><b>{{ money(profitTotal) }}</b></div>
-          <div class="fee-row total"><span>还款总额</span><b>{{ money(totalRepay) }}</b></div>
-          <div class="hint mt8">首付固定为 0，不参与计算；利率由每期还款额自动反推，无需录入。</div>
+          <div class="field"><div class="label">分期额（₫）<span class="req">*</span></div><input v-model="form.plan.price" class="input" type="number" min="0" step="1" placeholder="如 8300000"></div>
+          <div class="field"><div class="label">每期还款额（₫）<span class="req">*</span></div><input v-model="form.plan.perPeriod" class="input" type="number" min="0" step="1" placeholder="如 3306167"></div>
+          <div class="field"><div class="label">期数<span class="req">*</span></div><div class="radio-grid"><button v-for="n in [3,4,6,9,12]" :key="n" type="button" class="radio-card" :class="{ on: Number(form.plan.periods) === n }" @click="form.plan.periods = n">{{ n }} 期</button></div></div>
         </div>
 
         <div class="m-card">
           <div class="section-title">归属信息</div>
           <div class="field"><div class="label">门店<span class="req">*</span></div><select class="select" :value="form.plan.storeId" @change="selectStore($event.target.value)"><option v-for="store in stores" :key="store.id" :value="String(store.id)">{{ store.name }}</option></select></div>
-          <div class="field"><div class="label">业务员</div><input v-model="form.plan.salesName" class="input"></div>
+          <div class="field"><div class="label">业务员</div><input :value="form.plan.salesName || auth.displayName" class="input" readonly disabled style="background:#f5f7fa;color:#666"></div>
         </div>
 
         <div class="m-card">
