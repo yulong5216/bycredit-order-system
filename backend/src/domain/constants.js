@@ -34,7 +34,7 @@ const PERMISSIONS = Object.freeze({
   'order:first-review': ['first'],
   'order:final-review': ['final'],
   'order:send-finance': ['final'],
-  'order:cancel': [],
+  'order:cancel': ['sales', 'manager'],
   'order:plan': ['first'],
   'order:note': ['sales', 'manager', 'first', 'final', 'finance', 'aftercare', 'collector'],
   'esign:start': ['first'],
