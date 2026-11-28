@@ -97,7 +97,16 @@ export const api = {
   resetUserPassword: (id, data) => http.post(`/api/users/${id}/reset-password`, data),
   changeMyPassword: (oldPassword, newPassword) => http.put('/api/users/me/password', { oldPassword, newPassword }),
   listCustomers: (params = {}) => http.get('/api/customers', { params }),
-  orderLogs: id => http.get(`/api/logs/order/${id}`)
+  orderLogs: id => http.get(`/api/logs/order/${id}`),
+
+  // 收款账号管理
+  listPayeeAccounts: () => http.get('/api/collection/accounts'),
+  createPayeeAccount: data => http.post('/api/collection/accounts', data),
+  updatePayeeAccount: (id, data) => http.put(`/api/collection/accounts/${id}`, data),
+  deletePayeeAccount: id => http.delete(`/api/collection/accounts/${id}`),
+  switchPayeeAccount: (payeeAccountId, date, remark) => http.post('/api/collection/switch', { payeeAccountId, date, remark }),
+  currentPayeeAccount: () => http.get('/api/collection/current'),
+  payeeAccountHistory: (params = {}) => http.get('/api/collection/configs', { params })
 }
 
 export function saveBlob(data, filename) {

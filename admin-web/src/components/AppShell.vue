@@ -25,6 +25,8 @@ const allNav = computed(() => {
     { key: 'final', label: '待终审', to: '/orders?tab=final', show: auth.can('reviewFinal') || auth.role === 'admin' },
     { key: 'finance', label: '财务审核', to: '/orders?tab=finance', show: auth.can('finance') || auth.role === 'admin' },
     { key: 'bills', label: '账单管理', to: '/bills', show: auth.can('viewBills') || auth.role === 'admin' },
+    { group: '财务' },
+    { key: 'collection', label: '收款账号配置', to: '/collection/accounts', show: ['admin', 'finance', 'manager'].includes(auth.role) },
     { group: '资料与合同' },
     { key: 'customers', label: '客户档案', to: '/customers', show: auth.role === 'admin' },
     { group: '运营与系统' },
@@ -51,6 +53,7 @@ const activeNav = computed(() => {
     return 'orders'
   }
   if (p.startsWith('/bills')) return 'bills'
+  if (p.startsWith('/collection')) return 'collection'
   if (p.startsWith('/customers')) return 'customers'
   if (p.startsWith('/stores')) return 'stores'
   if (p.startsWith('/teams')) return 'teams'

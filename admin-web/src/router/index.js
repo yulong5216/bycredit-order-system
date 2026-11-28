@@ -23,8 +23,8 @@ const routes = [
   { path: '/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '员工管理', group: '运营与系统', permission: 'manageStores' } },
   { path: '/customers', name: 'customers', component: () => import('../views/CustomersView.vue'), meta: { title: '客户档案', group: '资料与合同', permission: 'viewCustomers' } },
   { path: '/customer', name: 'customer', component: () => import('../views/CustomerView.vue'), meta: { public: true } },
+  { path: '/collection/accounts', name: 'collection-accounts', component: () => import('../views/CollectionAccountsView.vue'), meta: { title: '收款账号配置', group: '财务', role: ['admin', 'finance', 'manager'] } },
   { path: '/:pathMatch(.*)*', redirect: '/orders' }
-]
 
 const router = createRouter({
   history: createWebHistory('/order-web/'),
@@ -39,7 +39,10 @@ router.beforeEach(async to => {
   if (!auth.user && !auth.ready) {
     try { await auth.fetchMe() } catch { auth.logout(); return { name: 'login' } }
   }
-  if (to.meta.role && auth.role !== to.meta.role) return { name: 'orders' }
+  if (to.meta.role) {
+    const roles = Array.isArray(to.meta.role) ? to.meta.role : [to.meta.role]
+    if (!roles.includes(auth.role)) return { name: 'orders' }
+  }
   if (to.meta.permission && !auth.can(to.meta.permission)) return { name: 'orders' }
   document.title = `${to.meta.title || '订单管理'} · BY Credit`
   return true
