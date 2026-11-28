@@ -1,6 +1,7 @@
 const integration = require('../config/integration');
 const config = require('../config');
 const mockPaymentProvider = require('../providers/mockPaymentProvider');
+const vietqrProvider = require('../providers/vietqrProvider');
 const { ORDER_STATUS, BILL_STATUS, ACTIVE_ORDER_STATUSES } = require('../domain/constants');
 const { DomainError, assert } = require('../domain/errors');
 const { audit } = require('../utils/audit');
@@ -11,6 +12,7 @@ const { repaymentStatus, isPaid } = require('../utils/repayment');
 const { transaction, findOrder, assertOrderAccess, detailInclude } = require('./orderService');
 
 function paymentDto(payment) {
+  const raw = payment.rawResponse || {};
   return {
     requestNo: payment.requestNo,
     shortCode: payment.requestNo,
@@ -21,8 +23,9 @@ function paymentDto(payment) {
     provider: payment.provider,
     channel: payment.channel,
     demo: payment.isMock,
-    qrLink: null,
-    qrCode: null,
+    qrLink: raw.vietqr?.dataUrl || null,
+    qrCode: raw.vietqr?.payload || null,
+    qrDataUrl: raw.vietqr?.dataUrl || null,
     expiresAt: payment.expiresAt,
     paid: payment.status === 'succeeded',
     paidAt: payment.paidAt,
@@ -31,35 +34,62 @@ function paymentDto(payment) {
   };
 }
 
+// 内部：查"今天生效的收款账号"，查不到返回 null
+async function getTodayPayeeAccount(prisma) {
+  const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  const cfg = await prisma.collectionConfig.findFirst({
+    where: { date: today, active: true },
+    include: { payeeAccount: true },
+    orderBy: { createdAt: 'desc' }
+  });
+  return cfg?.payeeAccount || null;
+}
+
 async function generate(prisma, actor, payload) {
-  assert(integration.paymentProvider === 'mock', 503, 'PAYMENT_DISABLED', '线上支付当前未启用，请使用人工还款登记');
   return transaction(prisma, async tx => {
-    const order = await findOrder(tx, payload.orderId, { customer: true, bills: true });
+    const order = await findOrder(tx, payload.orderId, { customer: true, bills: true, store: true });
     assertOrderAccess(order, actor);
     assert(ACTIVE_ORDER_STATUSES.includes(order.status) && order.status !== ORDER_STATUS.CLOSED, 409, 'INVALID_STATE', '订单当前不可还款');
     const bill = order.bills.find(item => item.period === Number(payload.period));
     assert(bill, 404, 'BILL_NOT_FOUND', '账单不存在');
     assert(!isPaid(bill), 409, 'BILL_PAID', '该期账单已完成还款');
-    const existing = await tx.paymentRequest.findFirst({
-      where: { billId: bill.id, status: 'pending', provider: 'mock', expiresAt: { gt: new Date() } },
+
+    // 查今天生效的收款账号，再 fallback 到 store.payee / order.payee
+    const cfgAccount = await getTodayPayeeAccount(tx);
+    const payee = cfgAccount
+      ? { bank: cfgAccount.bank, account: cfgAccount.account, holder: cfgAccount.holder }
+      : (order.payee || order.store?.payee || null);
+    assert(payee && payee.account, 409, 'PAYEE_MISSING', '没有配置收款账号，请先在后台选一下今天的收款账号');
+
+    // 避免给同一 bill 重复生成：60 秒内复用同一个 VietQR
+    const recent = await tx.paymentRequest.findFirst({
+      where: { billId: bill.id, status: 'pending', expiresAt: { gt: new Date(Date.now() + 60_000) } },
       orderBy: { createdAt: 'desc' }
     });
-    if (existing) return paymentDto(existing);
+    if (recent) return paymentDto(recent);
 
+    // 走 VietQR 生成真实可扫二维码
     const requestNo = requestNumber();
     const expiresAt = new Date(Date.now() + config.mockPaymentTtlMinutes * 60 * 1000);
-    const providerResult = mockPaymentProvider.createRequest({ requestNo, amount: bill.amount, expiresAt });
+    const vietqr = await vietqrProvider.buildFull({
+      account: payee.account,
+      amount: bill.amount,
+      orderNo: `${order.orderNo}-P${bill.period}`,
+      bank: payee.bank,
+      holder: payee.holder,
+      dynamic: true
+    });
     const payment = await tx.paymentRequest.create({
       data: {
         requestNo,
         orderId: order.id,
         billId: bill.id,
         amount: bill.amount,
-        channel: providerResult.channel,
-        provider: providerResult.provider,
-        isMock: true,
+        channel: 'vietqr',
+        provider: 'vietqr',
+        isMock: false,
         expiresAt,
-        rawResponse: providerResult.rawResponse,
+        rawResponse: { vietqr },
         actorName: actor.name || actor.phone
       }
     });
@@ -67,10 +97,10 @@ async function generate(prisma, actor, payload) {
       orderId: order.id,
       storeId: order.storeId,
       actor,
-      action: '创建演示支付请求',
-      before: `第 ${bill.period} 期 ${bill.status}`,
-      after: requestNo,
-      note: '不生成真实二维码，不发生真实扣款'
+      action: '生成还款二维码',
+      before: `第 ${bill.period} 期 ${bill.status} / ${payee.bank} ${payee.account}`,
+      after: `VietQR ${requestNo}`,
+      note: cfgAccount ? `切换账号: ${cfgAccount.bank} ${cfgAccount.account}` : 'fallback 账号'
     });
     return paymentDto(payment);
   });

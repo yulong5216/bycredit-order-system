@@ -52,7 +52,10 @@ const PERMISSIONS = Object.freeze({
   'store:create': [],
   'store:update': ['manager'],
   'store:rating': [],
-  'store:status': []
+  'store:status': [],
+  'collection-config:view': ['sales', 'manager', 'first', 'final', 'finance', 'aftercare', 'collector'],
+  'collection-config:manage': ['manager', 'finance'],
+  'collection-config:switch': ['manager', 'finance']
 });
 
 const REQUIRED_DOCS = Object.freeze([

@@ -233,3 +233,35 @@ model AuditLog {
   @@index([orderId, createdAt])
   @@index([storeId, createdAt])
 }
+
+// ===== 收款账号管理 =====
+// 可配置多个收款银行账号，每天选一个作为"主力收款账号"
+model PayeeAccount {
+  id        String    @id @default(cuid())
+  bank      String    @db.VarChar(64)       // 银行名: Vietcombank / TPBank / VietinBank ...
+  account   String    @db.VarChar(32)       // 银行账号
+  holder    String    @db.VarChar(100)      // 开户人
+  branch    String    @default("") @db.VarChar(200) // 开户支行（可选）
+  note      String    @default("") @db.VarChar(500) // 备注，比如"公司账号" / "老的" / "备用"
+  active    Boolean   @default(true)        // 软删
+  configs   CollectionConfig[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([bank, account])
+}
+
+// 某天选中哪个 PayeeAccount 作为主力收款账号
+model CollectionConfig {
+  id             String   @id @default(cuid())
+  date           DateTime @db.Date          // 哪一天 (UTC 0 点，实际按越南时区解释)
+  payeeAccountId String
+  payeeAccount   PayeeAccount @relation(fields: [payeeAccountId], references: [id])
+  active         Boolean  @default(true)    // 同一天可能被多次切换，只 active=true 生效
+  remark         String   @default("") @db.VarChar(500)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([date])
+  @@index([payeeAccountId])
+}

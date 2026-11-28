@@ -25,6 +25,7 @@ async function buildApp(options = {}) {
   await app.register(require('./routes/users'));
   await app.register(require('./routes/customers'));
   await app.register(require('./routes/logs'));
+  await app.register(require('./routes/collection'));
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof DomainError) {
