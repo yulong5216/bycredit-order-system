@@ -25,6 +25,7 @@ const routes = [
   { path: '/customer', name: 'customer', component: () => import('../views/CustomerView.vue'), meta: { public: true } },
   { path: '/collection/accounts', name: 'collection-accounts', component: () => import('../views/CollectionAccountsView.vue'), meta: { title: '收款账号配置', group: '财务', role: ['admin', 'finance', 'manager'] } },
   { path: '/:pathMatch(.*)*', redirect: '/orders' }
+]
 
 const router = createRouter({
   history: createWebHistory('/order-web/'),
