@@ -27,6 +27,7 @@ async function buildApp(options = {}) {
   await app.register(require('./routes/logs'));
   await app.register(require('./routes/collection'));
   await app.register(require('./routes/vietqr'));
+  await app.register(require('./routes/termPay'));
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof DomainError) {
